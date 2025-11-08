@@ -25,229 +25,78 @@ def args_to_string(args):
 
 def parse_args(args_list=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        'experiment',
-        help='name of experiment',
-        type=str
-    )
-    parser.add_argument(
-        'method',
-        help='the method to be used;'
-             ' possible are `FedAvg`, `FedEM`, `local`, `FedProx`, `L2SGD`,'
-             ' `pFedMe`, `AFL`, `FFL` and `clustered`;',
-        type=str
-    )
-    parser.add_argument(
-        '--decentralized',
-        help='if chosen decentralized version is used,'
-             'client are connected via an erdos-renyi graph of parameter p=0.5,'
-             'the mixing matrix is obtained via FMMC (Fast Mixin Markov Chain),'
-             'see https://web.stanford.edu/~boyd/papers/pdf/fmmc.pdf);'
-             'can be combined with `method=FedEM`, in that case it is equivalent to `D-EM`;'
-             'can not be used when method is `AFL` or `FFL`, in that case a warning is raised'
-             'and decentralized is set to `False`;'
-             'in all other cases D-SGD is used;',
-        action='store_true'
-    )
-    parser.add_argument(
-        '--sampling_rate',
-        help='proportion of clients to be used at each round; default is 1.0',
-        type=float,
-        default=1.0
-    )
-    parser.add_argument(
-        '--input_dimension',
-        help='the dimension of one input sample; only used for synthetic dataset',
-        type=int,
-        default=None
-    )
-    parser.add_argument(
-        '--output_dimension',
-        help='the dimension of output space; only used for synthetic dataset',
-        type=int,
-        default=None
-    )
-    parser.add_argument(
-        '--n_learners',
-        help='number of learners_ensemble to be used with `FedEM`; ignored if method is not `FedEM`; default is 3',
-        type=int,
-        default=3
-    )
-    parser.add_argument(
-        '--n_rounds',
-        help='number of communication rounds; default is 1',
-        type=int,
-        default=1
-    )
-    parser.add_argument(
-        '--bz',
-        help='batch_size; default is 1',
-        type=int,
-        default=1
-    )
-    parser.add_argument(
-        '--local_steps',
-        help='number of local steps before communication; default is 1',
-        type=int,
-        default=1
-    )
-    parser.add_argument(
-        '--log_freq',
-        help='frequency of writing logs; defaults is 1',
-        type=int,
-        default=1
-    )
-    parser.add_argument(
-        '--device',
-        help='device to use, either cpu or cuda; default is cpu',
-        type=int,
-        default=0
-    )
-    parser.add_argument(
-        '--optimizer',
-        help='optimizer to be used for the training; default is sgd',
-        type=str,
-        default="sgd"
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        help='learning rate; default is 1e-3',
-        default=1e-3
-    )
-    parser.add_argument(
-        "--lr_lambda",
-        type=float,
-        help='learning rate for clients weights; only used for agnostic FL; default is 0.',
-        default=0.
-    )
-    parser.add_argument(
-        "--lr_scheduler",
-        help='learning rate decay scheme to be used;'
-             ' possible are "sqrt", "linear", "cosine_annealing", "multi_step" and "constant" (no learning rate decay);'
-             'default is "constant"',
-        type=str,
-        default="constant"
-    )
-    parser.add_argument(
-        "--mu",
-        help='proximal / penalty term weight, used when --optimizer=`prox_sgd` also used with L2SGD; default is `0.`',
-        type=float,
-        default=0
-    )
-    parser.add_argument(
-        "--gamma",
-        help='the tolerate threhold of adaptive FedConceptEM; default is `0.`',
-        type=float,
-        default=0.05
-    )
-    parser.add_argument(
-        "--suffix",
-        help='the suffix to be added at the name of log files; default is empty string',
-        type=str,
-        default=''
-    )
-    parser.add_argument(
-        "--communication_probability",
-        help='communication probability, only used with L2SGD',
-        type=float,
-        default=0.1
-    )
-    parser.add_argument(
-        "--q",
-        help='fairness hyper-parameter, ony used for FFL client; default is 1.',
-        type=float,
-        default=1.
-    )
-    parser.add_argument(
-        "--locally_tune_clients",
-        help='if selected, clients are tuned locally for one epoch before writing logs;',
-        action='store_true'
-    )
-    parser.add_argument(
-        "--split",
-        help='if selected, feature and classifiers will be splitted',
-        action='store_true'
-    )
-    parser.add_argument(
-        "--hard_cluster",
-        help='if selected, use hard cluster for prediction',
-        action='store_true'
-    )
-    parser.add_argument(
-        "--binary",
-        help='if selected, use binary classification loss',
-        action='store_true'
-    )
-    parser.add_argument(
-        "--domain_disc",
-        help='if selected, will add a domain discriminator to learn more robust feature extractors',
-        action='store_true'
-    )
-    parser.add_argument(
-        "--phi_model",
-        help='if selected, will add an additional model phi for distance calculation (for stoCFL)',
-        action='store_true'
-    )
-    parser.add_argument(
-        '--validation',
-        help='if chosen the validation part will be used instead of test part;'
-             ' make sure to use `val_frac > 0` in `generate_data.py`;',
-        action='store_true'
-    )
-    parser.add_argument(
-        "--verbose",
-        help='verbosity level, `0` to quiet, `1` to show global logs and `2` to show local logs; default is `0`;',
-        type=int,
-        default=0
-    )
-    parser.add_argument(
-        "--logs_dir",
-        help='directory to write logs; if not passed, it is set using arguments',
-        default=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--save_dir",
-        help='directory to save checkpoints once the training is over; if not specified checkpoints are not saved',
-        default=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--seed",
-        help='random seed',
-        type=int,
-        default=1234
-    )
-    parser.add_argument(
-        '--embedding_dimension',
-        help='the dimension of the internal embedding',
-        type=int,
-        default=32
-    )
-    parser.add_argument(
-        '--em_step',
-        help='steps interval of updating ems',
-        type=int,
-        default=1
-    )
+    # Core
+    parser.add_argument('experiment', type=str, help='name of experiment')
+    parser.add_argument('method', type=str, help='method: FedAvg|FedEM|local|FedProx|L2SGD|pFedMe|AFL|FFL|clustered')
+    parser.add_argument('--decentralized', action='store_true', help='use decentralized version (D-SGD / D-EM)')
+    parser.add_argument('--sampling_rate', type=float, default=1.0, help='proportion of clients per round')
+    parser.add_argument('--input_dimension', type=int, default=None, help='synthetic only')
+    parser.add_argument('--output_dimension', type=int, default=None, help='synthetic only')
+    parser.add_argument('--n_learners', type=int, default=3, help='number of learners (FedEM)')
+    parser.add_argument('--n_rounds', type=int, default=1, help='communication rounds')
+    parser.add_argument('--bz', type=int, default=1, help='batch size')
+    parser.add_argument('--local_steps', type=int, default=1, help='local steps per round')
+    parser.add_argument('--log_freq', type=int, default=1, help='global log frequency (rounds)')
+    parser.add_argument('--device', type=int, default=0, help='GPU index (0=cuda:0, 1=cuda:1). For CPU, set CUDA_VISIBLE_DEVICES=""')
+    parser.add_argument('--optimizer', type=str, default='sgd', help='optimizer')
+    parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
+    parser.add_argument('--lr_lambda', type=float, default=0., help='client-weight lr (agnostic FL)')
+    parser.add_argument('--lr_scheduler', type=str, default='constant', help='sqrt|linear|cosine_annealing|multi_step|constant')
+    parser.add_argument('--mu', type=float, default=0, help='prox/penalty weight')
+    parser.add_argument('--gamma', type=float, default=0.05, help='tolerance threshold (FedConceptEM)')
+    parser.add_argument('--suffix', type=str, default='', help='suffix for log files')
+    parser.add_argument('--communication_probability', type=float, default=0.1, help='L2SGD only')
+    parser.add_argument('--q', type=float, default=1., help='FFL fairness hyper-parameter')
+    parser.add_argument('--locally_tune_clients', action='store_true', help='tune clients locally for 1 epoch before logs')
+    parser.add_argument('--split', action='store_true', help='split features and classifiers')
+    parser.add_argument('--hard_cluster', action='store_true', help='use hard cluster for prediction')
+    parser.add_argument('--binary', action='store_true', help='binary classification loss')
+    parser.add_argument('--domain_disc', action='store_true', help='add domain discriminator')
+    parser.add_argument('--diagnosis_mode', type=str, choices=['binary', 'multiclass'], default='binary', help='drift diagnosis granularity')
+    parser.add_argument('--objective_aware', action='store_true', help='enable objective-aware routing (uses client.objective if set)')
+    parser.add_argument('--objective_assignment', type=str, default=None,
+                        help='OPTIONAL: assign objectives: first_half:G,second_half:P | all:G | all:P | random_50_50')
 
-    parser.add_argument(
-        '--n_gmm',
-        help='n_gmm',
-        type=int,
-        default=1
-    )
+    # Adaptive thresholds
+    parser.add_argument('--adaptive_thresholds', action='store_true', help='use adaptive drift thresholds (mu+tau*sigma)')
+    parser.add_argument('--threshold_tau', type=float, default=3.0, help='tau for adaptive thresholds')
+    parser.add_argument('--threshold_window', type=int, default=10, help='baseline rolling window')
+    parser.add_argument('--use_statistical_tests', action='store_true', help='use chi-square & KS tests instead of mu+tau*sigma')
 
-    parser.add_argument(
-        '--T',
-        help='concept drift time slot',
-        type=int,
-        default=2
-    )
+    # Differential Privacy
+    parser.add_argument('--use_dp', action='store_true', help='enable differential privacy for prototypes')
+    parser.add_argument('--dp_epsilon', type=float, default=1.0, help='DP epsilon')
+    parser.add_argument('--dp_delta', type=float, default=1e-5, help='DP delta')
+    parser.add_argument('--dp_mechanism', type=str, choices=['gaussian', 'laplace'], default='gaussian', help='DP mechanism')
+    parser.add_argument('--dp_max_norm', type=float, default=10.0, help='DP clipping bound')
 
+    # Global eval & ablations
+    parser.add_argument('--global_eval', action='store_true', default=True, help='evaluate on fixed 0° global test set (default ON)')
+    parser.add_argument('--abl_all_reset', action='store_true', help='force reset for non-real drifts (real still resets)')
+    parser.add_argument('--abl_all_merge', action='store_true', help='force merge for non-real drifts (real still resets)')
+    parser.add_argument('--eval_all_past_concepts', action='store_true', help='at final slot, evaluate over all past per-slot test iterators')
 
-    if args_list:
-        args = parser.parse_args(args_list)
-    else:
-        args = parser.parse_args()
+    # Merge policy (routing)
+    parser.add_argument('--merge_policy', type=str,
+                        default='real:allP,label:halfP,halfG,feature:halfP,halfG,none:halfP,halfG',
+                        help=('Routing policy per drift type (continual vs reset). Examples: '
+                              '"real:allP,label:halfP,halfG,feature:allG,none:halfP,halfG" or '
+                              '"real:reset;label:follow;feature:follow;none:follow". '
+                              'Aliases: reset=allP (reset/no merge), merge=allG (merge), split=halfP,halfG (50/50 or objective-aware), '
+                              'follow = objective-aware (P=reset, G=merge). NOTE: quote the whole string if you use semicolons.'))
 
+    # Misc
+    parser.add_argument('--phi_model', action='store_true', help='add auxiliary phi model (stoCFL)')
+    parser.add_argument('--validation', action='store_true', help='use validation instead of test')
+    parser.add_argument('--verbose', type=int, default=0, help='verbosity 0|1|2')
+    parser.add_argument('--logs_dir', default=argparse.SUPPRESS, help='logs root (auto if omitted)')
+    parser.add_argument('--save_dir', default=argparse.SUPPRESS, help='directory to save checkpoints at end')
+    parser.add_argument('--seed', type=int, default=1234, help='random seed')
+    parser.add_argument('--seeds', type=str, default=None, help='comma-separated seeds (overrides --seed)')
+    parser.add_argument('--embedding_dimension', type=int, default=32, help='internal embedding size')
+    parser.add_argument('--em_step', type=int, default=1, help='EM update interval (steps)')
+    parser.add_argument('--n_gmm', type=int, default=1, help='number of GMM components')
+    parser.add_argument('--T', type=int, default=2, help='number of time slots (concept drift)')
+
+    args = parser.parse_args(args_list) if args_list else parser.parse_args()
     return args

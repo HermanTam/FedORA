@@ -32,12 +32,14 @@ import cv2
 from scipy.ndimage import zoom as scizoom
 from scipy.ndimage.interpolation import map_coordinates
 import warnings
-
+from pathlib import Path
 warnings.simplefilter("ignore", UserWarning)
 
 def save_data(l, path_):
-    with open(path_, 'wb') as f:
+    Path(path_).parent.mkdir(parents=True, exist_ok=True)
+    with open(path_, "wb") as f:
         pickle.dump(l, f)
+
 
 
 def disk(radius, alias_blur=0.1, dtype=np.float32):
@@ -757,7 +759,16 @@ d["canny_edges"] = canny_edges
 # test_data = dset.CIFAR100('./data/cifar100-c/origin/', train=False, download=True)
 train_data = dset.FashionMNIST('./data/fmnist-c/origin/', train=True, download=True)
 test_data = dset.FashionMNIST('./data/fmnist-c/origin/', train=False, download=True)
-convert_img = trn.Compose([trn.ToTensor(), trn.ToPILImage()])
+
+
+def convert_img(img):
+    """Convert tensors or PIL images into a numpy array without relying on torchvision helpers."""
+    if isinstance(img, torch.Tensor):
+        arr = img.detach().cpu()
+        if arr.ndim == 3:
+            arr = arr.permute(1, 2, 0)
+        return arr.numpy()
+    return np.asarray(img)
 
 # corruption_methods = [
 #     "identity",
@@ -891,5 +902,4 @@ save_data(client_2,'./data/fmnist-c-60_client-simple2-iid-4concept-change-name-v
 save_data(client_3,'./data/fmnist-c-60_client-simple2-iid-4concept-change-name-version2/test-3.pkl')
 save_data(client_4,'./data/fmnist-c-60_client-simple2-iid-4concept-change-name-version2/test-4.pkl')
 print('Done.')
-
 

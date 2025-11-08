@@ -119,18 +119,47 @@ class Client(object):
         self.sample_learner_weights = torch.ones(self.n_learners, self.n_train_samples) / self.n_learners
 
         self.entropy = torch.ones(self.n_train_samples)
+        self.drift_type = 'none'
+        self.objective = 'G'
+        self._event_baselines = []
+        self._event_results = []
 
 
 
     def update_labels_weights(self, labels_weights):
+        """Update per-sample label weights for the current train iterator.
+
+        Supports both scalar (single-class) labels and iterable labels. Avoids
+        relying on fragile width>n_train heuristics by inspecting the label type
+        and computing the per-sample segment width dynamically.
+        """
+        total_cols = self.labels_weights.shape[1]
+        n = self.n_train_samples
+        # Compute segment width if labels_weights uses a widened layout
+        seg_width = max(1, total_cols // max(1, n))
         for i, y in enumerate(self.train_iterator.dataset.targets):
-            if self.labels_weights.shape[1] > self.n_train_samples:
-                for y_i_index, y_i in enumerate(y):
-                    for j in range(self.n_learners):
-                        self.labels_weights[j][i * 80 + y_i_index] = labels_weights[j][y_i]
+            # Normalize label(s)
+            if isinstance(y, (list, tuple, np.ndarray)) and not np.isscalar(y):
+                labels_seq = [int(v) for v in list(y)]
             else:
+                labels_seq = [int(y)]
+
+            if seg_width > 1:
+                base = i * seg_width
+                for y_i_index, cls in enumerate(labels_seq):
+                    col = base + y_i_index
+                    if col >= total_cols:
+                        break
+                    for j in range(self.n_learners):
+                        self.labels_weights[j][col] = labels_weights[j][cls]
+            else:
+                # Single column per sample
+                # If multiple labels, just assign by the first (fallback)
+                cls = labels_seq[0]
                 for j in range(self.n_learners):
-                    self.labels_weights[j][i] = labels_weights[j][y]
+                    self.labels_weights[j][i] = labels_weights[j][cls]
+
+        # Push per-class learner weights to learners (unchanged)
         for i, learner in enumerate(self.learners_ensemble.learners):
             learner.labels_weights = labels_weights[i]
     def get_label_stats(self):
@@ -201,7 +230,22 @@ class Client(object):
         alpha = 2.0 ** 3
         #get baseline L
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        baseline_L = torch.sum(torch.exp(- all_losses - torch.log(self.labels_weights)) * self.samples_weights) / self.n_train_samples
+        n_val = len(self.val_iterator.dataset)
+        # Align label weights to validation set length
+        if self.labels_weights.shape[1] != n_val:
+            lw_val = torch.zeros(self.n_learners, n_val)
+            try:
+                val_labels = self.val_iterator.dataset.targets
+                if hasattr(val_labels, 'tolist'):
+                    val_labels = val_labels.tolist()
+                for i, y in enumerate(val_labels):
+                    lw_val[:, i] = self.labels_learner_weights[:, int(y)]
+            except Exception:
+                lw_val[:] = 1.0 / self.n_learners
+            labels_weights = lw_val.clamp(min=1e-8)
+        else:
+            labels_weights = self.labels_weights.clamp(min=1e-8)
+        baseline_L = torch.sum(torch.exp(- all_losses - torch.log(labels_weights)) * self.samples_weights) / max(1, n_val)
         # get updates
         initial_state_dicts = [deepcopy(learner.model.state_dict()) for learner in initial_params.learners]
         params_updates_dicts = [deepcopy(learner.model.state_dict()) for learner in initial_params.learners]
@@ -318,6 +362,72 @@ class Client(object):
         self.data_type = client_type
         self.feature_types = feature_type
 
+    @staticmethod
+    def _dataset_targets(dataset):
+        if hasattr(dataset, "targets"):
+            return dataset.targets
+        if hasattr(dataset, "labels"):
+            return dataset.labels
+        raise AttributeError("Dataset does not expose `targets` or `labels` attributes.")
+
+    @staticmethod
+    def _to_numpy(labels):
+        if isinstance(labels, torch.Tensor):
+            return labels.detach().cpu().numpy()
+        return np.asarray(labels)
+
+    def get_dataset_labels(self, dataset):
+        return self._to_numpy(self._dataset_targets(dataset))
+
+    def get_iterator_labels(self, iterator):
+        return self.get_dataset_labels(iterator.dataset)
+
+    def label_distribution(self, labels, smoothing=1e-12):
+        hist = np.bincount(labels.astype(int), minlength=self.class_number).astype(np.float64)
+        total = hist.sum()
+        if total <= 0:
+            return np.zeros_like(hist, dtype=np.float64)
+        return hist / (total + smoothing)
+
+    def get_iterator_features_and_labels(self, iterator):
+        return self.learners_ensemble.get_first_model_output_and_labels(iterator)
+
+    def evaluate_accuracy(self, iterator):
+        if iterator is None:
+            return None
+        _, acc = self.learners_ensemble.evaluate_iterator(iterator)
+        return acc
+
+    # Helper: build per-validation-sample label weights aligned to gathered losses
+    def _val_labels_weights_T(self):
+        n_val = len(self.val_iterator.dataset)
+        # If already aligned to validation set size
+        if self.labels_weights.shape[1] == n_val:
+            return self.labels_weights.T.clamp(min=1e-8)
+        # Otherwise, derive from per-class learner weights
+        lw_val = torch.zeros(self.n_learners, n_val)
+        try:
+            val_labels = self.val_iterator.dataset.targets
+            if hasattr(val_labels, 'tolist'):
+                val_labels = val_labels.tolist()
+            for i, y in enumerate(val_labels):
+                lw_val[:, i] = self.labels_learner_weights[:, int(y)]
+        except Exception:
+            lw_val[:] = 1.0 / self.n_learners
+        return lw_val.T.clamp(min=1e-8)
+
+    def record_event_baseline(self, baseline):
+        self._event_baselines.append(baseline)
+
+    def record_event_result(self, result):
+        self._event_results.append(result)
+
+    def last_event_baseline(self):
+        return self._event_baselines[-1] if self._event_baselines else None
+
+    def last_event_result(self):
+        return self._event_results[-1] if self._event_results else None
+
     def get_output(self):
         
         output = self.learners_ensemble.get_output(self.val_iterator)
@@ -346,15 +456,17 @@ class MixtureClient(Client):
 
     def update_learner_labels_weights(self):
         self.labels_learner_weights = torch.zeros(self.n_learners, self.class_number) / self.class_number
-        if self.labels_weights.shape[1] > self.n_train_samples:
-            for i, y in enumerate(self.train_iterator.dataset.targets):
+        for i, y in enumerate(self.train_iterator.dataset.targets):
+            # y may be scalar or a sequence; handle both robustly
+            if isinstance(y, (list, tuple, np.ndarray)) and not np.isscalar(y):
                 for y_i in y:
+                    yi = int(y_i)
                     for j in range(self.n_learners):
-                        self.labels_learner_weights[j][y_i] += self.samples_weights[j][i]
-        else:
-            for i, y in enumerate(self.train_iterator.dataset.targets):
+                        self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
+            else:
+                yi = int(y)
                 for j in range(self.n_learners):
-                    self.labels_learner_weights[j][y] += self.samples_weights[j][i]
+                    self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
                     
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
@@ -372,15 +484,16 @@ class MixtureClient_SW(Client):
 
     def update_learner_labels_weights(self):
         self.labels_learner_weights = torch.zeros(self.n_learners, self.class_number) / self.class_number
-        if self.labels_weights.shape[1] > self.n_train_samples:
-            for i, y in enumerate(self.train_iterator.dataset.targets):
+        for i, y in enumerate(self.train_iterator.dataset.targets):
+            if isinstance(y, (list, tuple, np.ndarray)) and not np.isscalar(y):
                 for y_i in y:
+                    yi = int(y_i)
                     for j in range(self.n_learners):
-                        self.labels_learner_weights[j][y_i] += self.samples_weights[j][i]
-        else:
-            for i, y in enumerate(self.train_iterator.dataset.targets):
+                        self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
+            else:
+                yi = int(y)
                 for j in range(self.n_learners):
-                    self.labels_learner_weights[j][y] += self.samples_weights[j][i]
+                    self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
                     
     # def update_sample_weights(self):
     #     all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
@@ -418,28 +531,39 @@ class MixtureClient_SW(Client):
 class FedRC(Client):
 
     def update_learner_labels_weights(self):
-       
         self.labels_learner_weights = torch.zeros(self.n_learners, self.class_number) / self.class_number
-        if self.labels_weights.shape[1] > self.n_train_samples:
-            
-            for i, y in enumerate(self.train_iterator.dataset.targets):
-                
-                for y_i in y: 
+        for i, y in enumerate(self.train_iterator.dataset.targets):
+            if isinstance(y, (list, tuple, np.ndarray)) and not np.isscalar(y):
+                for y_i in y:
+                    yi = int(y_i)
                     for j in range(self.n_learners):
-                        self.labels_learner_weights[j][y_i] += self.samples_weights[j][i]
-        else:
-            
-            for i, y in enumerate(self.train_iterator.dataset.targets):
-                
+                        self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
+            else:
+                yi = int(y)
                 for j in range(self.n_learners):
-                    
-                    self.labels_learner_weights[j][y] += self.samples_weights[j][i]
+                    self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
                     
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        L = - all_losses.T - torch.log(self.labels_weights.T)
+        # Build validation-aligned label weights to match all_losses size
+        n_val = len(self.val_iterator.dataset)
+        if self.labels_weights.shape[1] != n_val:
+            lw_val = torch.zeros(self.n_learners, n_val)
+            try:
+                val_labels = self.val_iterator.dataset.targets
+                if hasattr(val_labels, 'tolist'):
+                    val_labels = val_labels.tolist()
+                for i, y in enumerate(val_labels):
+                    lw_val[:, i] = self.labels_learner_weights[:, int(y)]
+            except Exception:
+                lw_val[:] = 1.0 / self.n_learners
+            labels_weights_T = lw_val.T.clamp(min=1e-8)
+        else:
+            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+
+        L = - all_losses.T - torch.log(labels_weights_T)
 
 
         # L = L.reshape(self.n_train_samples, 80, self.n_learners)
@@ -526,7 +650,8 @@ class FedRC_Concept_Drift(Client):
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        L = - all_losses.T - torch.log(self.labels_weights.T)
+        labels_weights_T = self._val_labels_weights_T()
+        L = - all_losses.T - torch.log(labels_weights_T)
 
 
         # L = L.reshape(self.n_train_samples, 80, self.n_learners)
@@ -570,6 +695,32 @@ class FedRC_Concept_Drift(Client):
         
         losses,accuracies = self.learners_ensemble.get_all_models_loss_and_accuracy(self.current_val_iterator)
         return losses,accuracies
+
+    def get_last_labels(self):
+        return self.get_dataset_labels(self.last_val_iterator.dataset)
+
+    def get_current_labels(self):
+        return self.get_dataset_labels(self.current_val_iterator.dataset)
+
+    def get_last_label_distribution(self):
+        return self.label_distribution(self.get_last_labels())
+
+    def get_current_label_distribution(self):
+        return self.label_distribution(self.get_current_labels())
+
+    def get_last_features_and_labels(self):
+        return self.get_iterator_features_and_labels(self.last_val_iterator)
+
+    def get_current_features_and_labels(self):
+        return self.get_iterator_features_and_labels(self.current_val_iterator)
+
+    def get_last_features(self):
+        features, _ = self.get_last_features_and_labels()
+        return features
+
+    def get_current_features(self):
+        features, _ = self.get_current_features_and_labels()
+        return features
 
 
 
@@ -774,28 +925,24 @@ class FedRC_Concept_Drift_version2(Client):
 
     
     def update_learner_labels_weights(self):
-        
         self.labels_learner_weights = torch.zeros(self.n_learners, self.class_number) / self.class_number
-        if self.labels_weights.shape[1] > self.n_train_samples:
-           
-            for i, y in enumerate(self.train_iterator.dataset.targets):
-                
-                for y_i in y: 
+        for i, y in enumerate(self.train_iterator.dataset.targets):
+            if isinstance(y, (list, tuple, np.ndarray)) and not np.isscalar(y):
+                for y_i in y:
+                    yi = int(y_i)
                     for j in range(self.n_learners):
-                        self.labels_learner_weights[j][y_i] += self.samples_weights[j][i]
-        else:
-            
-            for i, y in enumerate(self.train_iterator.dataset.targets):
-                
+                        self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
+            else:
+                yi = int(y)
                 for j in range(self.n_learners):
-                    
-                    self.labels_learner_weights[j][y] += self.samples_weights[j][i]
+                    self.labels_learner_weights[j][yi] += self.samples_weights[j][i]
 
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        L = - all_losses.T - torch.log(self.labels_weights.T)
+        labels_weights_T = self._val_labels_weights_T()
+        L = - all_losses.T - torch.log(labels_weights_T)
         
 
         # L = L.reshape(self.n_train_samples, 80, self.n_learners)
@@ -867,6 +1014,32 @@ class FedRC_Concept_Drift_version2(Client):
         
         losses,accuracies = self.learners_ensemble.get_all_models_loss_and_accuracy(self.current_val_iterator)
         return losses,accuracies
+
+    def get_last_labels(self):
+        return self.get_dataset_labels(self.last_val_iterator.dataset)
+
+    def get_current_labels(self):
+        return self.get_dataset_labels(self.current_val_iterator.dataset)
+
+    def get_last_label_distribution(self):
+        return self.label_distribution(self.get_last_labels())
+
+    def get_current_label_distribution(self):
+        return self.label_distribution(self.get_current_labels())
+
+    def get_last_features_and_labels(self):
+        return self.get_iterator_features_and_labels(self.last_val_iterator)
+
+    def get_current_features_and_labels(self):
+        return self.get_iterator_features_and_labels(self.current_val_iterator)
+
+    def get_last_features(self):
+        features, _ = self.get_last_features_and_labels()
+        return features
+
+    def get_current_features(self):
+        features, _ = self.get_current_features_and_labels()
+        return features
 
     def get_real_shift_label(self):
 
@@ -1076,7 +1249,8 @@ class FedRC_SW(FedRC):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        L = - all_losses.T - torch.log(self.labels_weights.T)
+        labels_weights_T = self._val_labels_weights_T()
+        L = - all_losses.T - torch.log(labels_weights_T)
 
         self.mean_I = torch.exp(torch.log(self.sample_learner_weights.T) - all_losses.T).T
         self.mean_I = torch.mean(torch.sum(self.mean_I,dim=0))
@@ -1122,7 +1296,8 @@ class FedRC_Adam(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        L = - all_losses.T - torch.log(self.labels_weights.T)
+        labels_weights_T = self._val_labels_weights_T()
+        L = - all_losses.T - torch.log(labels_weights_T)
 
         new_samples_weights = F.softmax(torch.log(self.learners_ensemble.learners_weights) + L, dim=1).T
         # add adam
@@ -1160,7 +1335,8 @@ class FedRC_DP(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        L = - all_losses.T - torch.log(self.labels_weights.T)
+        labels_weights_T = self._val_labels_weights_T()
+        L = - all_losses.T - torch.log(labels_weights_T)
 
         new_samples_weights = F.softmax(torch.log(self.learners_ensemble.learners_weights) + L, dim=1).T
         self.samples_weights = new_samples_weights

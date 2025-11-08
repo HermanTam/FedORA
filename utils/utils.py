@@ -2419,3 +2419,25 @@ def get_aggregator(
             " `personalized`, `clustered`, `fednova`, `AFL`,"
             " `FFL` and `decentralized`."
         )
+
+
+def parse_objective_map(map_string):
+    """
+    Parse a user-provided mapping string of the form "0:G,1:P" into a dictionary.
+    Returns an empty dict if the string is empty/None.
+    """
+    mapping = {}
+    if not map_string:
+        return mapping
+
+    for pair in map_string.split(','):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if ':' not in pair:
+            raise ValueError(f"Invalid objective map entry '{pair}'. Expected format '<key>:<value>'.")
+        key_str, value_str = pair.split(':', 1)
+        key = int(key_str.strip())
+        value = value_str.strip().upper()
+        mapping[key] = value
+    return mapping

@@ -101,6 +101,10 @@ class Aggregator(ABC):
             *args,
             **kwargs
     ):
+        self.metrics_hook = kwargs.pop("metrics_hook", None)
+        self.round_offset = kwargs.pop("round_offset", 0)
+        # Optional: experiment run logs directory (experiments/.../seed_xxx/logs)
+        self.exp_logs_dir = kwargs.pop("logs_dir", None)
 
         rng_seed = (seed if (seed is not None and seed >= 0) else int(time.time()))
         self.rng = random.Random(rng_seed)
@@ -124,6 +128,18 @@ class Aggregator(ABC):
         self.verbose = verbose
         self.global_train_logger = global_train_logger
         self.global_test_logger = global_test_logger
+
+        # Derive experiment logs dir from the train logger if not provided
+        if self.exp_logs_dir is None:
+            try:
+                train_log_dir = getattr(self.global_train_logger, 'log_dir', None)
+                if train_log_dir:
+                    # train_log_dir typically points to .../logs/train/global
+                    # We want the seed logs root: .../logs
+                    base_logs = os.path.normpath(os.path.join(train_log_dir, os.pardir, os.pardir))
+                    self.exp_logs_dir = base_logs
+            except Exception:
+                self.exp_logs_dir = None
 
         self.model_dim = self.global_learners_ensemble.model_dim
         self.prototype_dim = self.global_learners_ensemble.prototype_dim
@@ -208,6 +224,21 @@ class Aggregator(ABC):
             for client_id, client in enumerate(clients): 
 
                 train_loss, train_acc, test_loss, test_acc = client.write_logs()
+                if (
+                        self.metrics_hook is not None
+                        and client_type == 'train'
+                        and self.c_round > 0
+                ):
+                    self.metrics_hook(
+                        client_id=client_id,
+                        round_idx=self.c_round,
+                        train_loss=train_loss,
+                        train_acc=train_acc,
+                        test_loss=test_loss,
+                        test_acc=test_acc,
+                        n_train_samples=client.n_train_samples,
+                        round_offset=self.round_offset
+                    )
 
                 if client_type == 'test':
                     test_train_acces.append(train_acc)
@@ -244,8 +275,20 @@ class Aggregator(ABC):
                 print(f"Train Loss: {global_train_loss:.3f} | Train Acc: {global_train_acc * 100:.3f}% |", end="")
                 print(f"Test Loss: {global_test_loss:.3f} | Test Acc: {global_test_acc * 100:.3f}% |")
                 print("+" * 50)
-                with open('./logs/{}/results-{}-{}.txt'.format(self.experiment, self.method, self.suffix), 'a+') as f:
-                    f.write('{}, {}, {}, {}\n'.format(global_train_loss, global_train_acc, global_test_loss, global_test_acc))
+                # Write compact global metrics line to the project logs folder
+                proj_logs_dir = os.path.join('.', 'logs', str(self.experiment))
+                os.makedirs(proj_logs_dir, exist_ok=True)
+                results_line = '{}, {}, {}, {}\n'.format(global_train_loss, global_train_acc, global_test_loss, global_test_acc)
+                with open(os.path.join(proj_logs_dir, 'results-{}-{}.txt'.format(self.method, self.suffix)), 'a+') as f:
+                    f.write(results_line)
+                # Also mirror into the experiment run logs folder if available
+                if self.exp_logs_dir is not None:
+                    try:
+                        os.makedirs(self.exp_logs_dir, exist_ok=True)
+                        with open(os.path.join(self.exp_logs_dir, 'results-{}-{}.txt'.format(self.method, self.suffix)), 'a+') as f:
+                            f.write(results_line)
+                    except Exception:
+                        pass
 
             global_logger.add_scalar("Train/Loss", global_train_loss, self.c_round)
             global_logger.add_scalar("Train/Metric", global_train_acc, self.c_round)
@@ -260,13 +303,26 @@ class Aggregator(ABC):
         print('test test variance: ' + str(torch.std(torch.tensor(test_test_acces) + 0.0).item()))
         print('test train mean: ' + str(torch.mean(torch.tensor(test_train_acces) + 0.0).item()))
         print('test test mean: ' + str(torch.mean(torch.tensor(test_test_acces) + 0.0).item()))
-        with open('./logs/{}/test-results-{}-{}.txt'.format(self.experiment, self.method, self.suffix), 'a+') as f:
-            f.write('test train accs: ' + str(test_train_acces) + '\n')
-            f.write('test_test_acces: ' + str(test_test_acces) + '\n')
-            f.write('test train variance: ' + str(torch.std(torch.tensor(test_train_acces) + 0.0).item()) + '\n')
-            f.write('test test variance: ' + str(torch.std(torch.tensor(test_test_acces) + 0.0).item()) + '\n')
-            f.write('test train mean: ' + str(torch.mean(torch.tensor(test_train_acces) + 0.0).item()) + '\n')
-            f.write('test test mean: ' + str(torch.mean(torch.tensor(test_test_acces) + 0.0).item()) + '\n')
+        # Persist detailed test client metrics to both project logs and experiment logs (if available)
+        proj_logs_dir = os.path.join('.', 'logs', str(self.experiment))
+        os.makedirs(proj_logs_dir, exist_ok=True)
+        test_results_filename = 'test-results-{}-{}.txt'.format(self.method, self.suffix)
+        def _write_test_results(path):
+            with open(path, 'a+') as f:
+                f.write('test train accs: ' + str(test_train_acces) + '\n')
+                f.write('test_test_acces: ' + str(test_test_acces) + '\n')
+                f.write('test train variance: ' + str(torch.std(torch.tensor(test_train_acces) + 0.0).item()) + '\n')
+                f.write('test test variance: ' + str(torch.std(torch.tensor(test_test_acces) + 0.0).item()) + '\n')
+                f.write('test train mean: ' + str(torch.mean(torch.tensor(test_train_acces) + 0.0).item()) + '\n')
+                f.write('test test mean: ' + str(torch.mean(torch.tensor(test_test_acces) + 0.0).item()) + '\n')
+
+        _write_test_results(os.path.join(proj_logs_dir, test_results_filename))
+        if self.exp_logs_dir is not None:
+            try:
+                os.makedirs(self.exp_logs_dir, exist_ok=True)
+                _write_test_results(os.path.join(self.exp_logs_dir, test_results_filename))
+            except Exception:
+                pass
 
         if self.verbose > 0:
             print("#" * 80)

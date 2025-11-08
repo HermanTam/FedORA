@@ -31,12 +31,14 @@ import cv2
 from scipy.ndimage import zoom as scizoom
 from scipy.ndimage.interpolation import map_coordinates
 import warnings
-
+from pathlib import Path
 warnings.simplefilter("ignore", UserWarning)
 
 def save_data(l, path_):
-    with open(path_, 'wb') as f:
+    Path(path_).parent.mkdir(parents=True, exist_ok=True)
+    with open(path_, "wb") as f:
         pickle.dump(l, f)
+
 
 
 def disk(radius, alias_blur=0.1, dtype=np.float32):
@@ -559,7 +561,16 @@ train_data = dset.CIFAR10('./data/cifar10-c/origin/', train=True, download=True)
 test_data = dset.CIFAR10('./data/cifar10-c/origin/', train=False, download=True)
 # train_data = dset.CIFAR100('./data/cifar100-c/origin/', train=True, download=True)
 # test_data = dset.CIFAR100('./data/cifar100-c/origin/', train=False, download=True)
-convert_img = trn.Compose([trn.ToTensor(), trn.ToPILImage()])
+
+
+def convert_img(img):
+    """Convert tensors or PIL images into a numpy array without relying on torchvision helpers."""
+    if isinstance(img, torch.Tensor):
+        arr = img.detach().cpu()
+        if arr.ndim == 3:
+            arr = arr.permute(1, 2, 0)
+        return arr.numpy()
+    return np.asarray(img)
 
 corruption_methods = ['Gaussian Noise', 'Shot Noise', 'Impulse Noise', 'Defocus Blur', 'Glass Blur', 'Motion Blur', 'Zoom Blur', 'Snow', 'Frost', 'Fog', 'Brightness', 'Contrast', 'Elastic', 'Pixelate', 'JPEG', 'Speckle Noise', 'Gaussian Blur', 'Spatter', 'Saturate']
 
@@ -689,4 +700,3 @@ save_data(client_4,'./data/cifar10-c-60_client-simple2-iid-4concept-change-name-
 # save_data(client_3,'./data/cifar100-c/test-3.pkl')
 
 print('Done.')
-

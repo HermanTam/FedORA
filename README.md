@@ -2,21 +2,20 @@
 
 
 
-## Environments
+## Environment
 
-```
-pillow=11.0.0
-tqdm=4.66.5
-scikit-learn=1.5.2
-numpy=1.26.4
-pytorch=1.12.1
-matplotlib=3.9.2
-networkx=3.2.1
-cvxpy=1.6.0
-torchvision=0.13.1
-cuda-version=10.2
-cudatoolkit=10.2.89
-```
+1. Create the conda environment (installs PyTorch 2.4 with CUDA 11.8 support):
+   ```
+   conda env create -f environment.yml
+   ```
+2. Activate it:
+   ```
+   conda activate feddaa
+   ```
+3. Install the remaining pure-Python packages:
+   ```
+   pip install -r requirements.txt
+   ```
 
 ## Data
 
@@ -53,7 +52,6 @@ python FedDAA_Fashion_MNIST.py fmnist-c fedrc_store_history --n_learners 2 --bz 
 
 
 ```
-
 
 
 
