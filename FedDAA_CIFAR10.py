@@ -2868,6 +2868,49 @@ def run_experiment(args_, exp_logger=None):
                         oa_global_accs.append(acc)
                 if len(oa_global_accs) > 0:
                     time_objective_aware_global_means.append(float(np.mean(oa_global_accs)))
+
+            # Write compact per-slot summary for paper-friendly logging
+            try:
+                slot_summary_path = logs_base_path / f"slot-summary-{args_.method}-{args_.gamma}-{args_.suffix}.txt"
+                nP = sum(1 for c in clients if getattr(c, 'objective', 'G') == 'P')
+                nG = sum(1 for c in clients if getattr(c, 'objective', 'G') == 'G')
+                # Optional per-slot drift type counts if available
+                type_counts = None
+                if 'drift_types' in locals() and isinstance(drift_types, dict):
+                    type_counts = dict(Counter(drift_types.values()))
+
+                # Compute G-old and P-current means explicitly
+                p_curr = [
+                    evaluate_iterator_accuracy(c.learners_ensemble, c.test_iterator)
+                    for c in clients if getattr(c, 'objective', 'G') == 'P'
+                ]
+                p_curr = [x for x in p_curr if x is not None]
+                g_old = [
+                    evaluate_iterator_accuracy(c.learners_ensemble, getattr(c, 'last_test_iterator', None))
+                    for c in clients if getattr(c, 'objective', 'G') == 'G'
+                ]
+                g_old = [x for x in g_old if x is not None]
+
+                with open(slot_summary_path, 'a+') as fsum:
+                    fsum.write(f"time_slot={t}\n")
+                    if type_counts is not None:
+                        fsum.write(f"drift_type_counts={type_counts}\n")
+                    fsum.write(f"n_clients={len(clients)}, nP={nP}, nG={nG}\n")
+                    if local_accs:
+                        fsum.write(f"local_all_mean={np.mean(local_accs):.4f}\n")
+                    if 'global_accs' in locals() and global_accs:
+                        fsum.write(f"global_all_mean={np.mean(global_accs):.4f}\n")
+                    if oa_old_accs:
+                        fsum.write(f"oa_old_mean={np.mean(oa_old_accs):.4f}\n")
+                    if 'oa_global_accs' in locals() and oa_global_accs:
+                        fsum.write(f"oa_global_mean={np.mean(oa_global_accs):.4f}\n")
+                    if p_curr:
+                        fsum.write(f"P_on_current_mean={np.mean(p_curr):.4f}\n")
+                    if g_old:
+                        fsum.write(f"G_on_old_mean={np.mean(g_old):.4f}\n")
+                    fsum.write("-" * 80 + "\n")
+            except Exception:
+                pass
         except Exception:
             pass
 
