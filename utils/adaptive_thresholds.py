@@ -26,7 +26,8 @@ class AdaptiveThresholdManager:
     - Configurable confidence levels
     """
     
-    def __init__(self, tau=3.0, window_size=10, min_samples=3):
+    def __init__(self, tau=3.0, window_size=10, min_samples=3,
+                 mode: str = "window", alpha: float = 0.2):
         """
         Initialize threshold manager.
         
@@ -34,10 +35,17 @@ class AdaptiveThresholdManager:
             tau: Number of standard deviations for threshold (default 3.0 = 99.7% confidence)
             window_size: Rolling window size for computing baseline statistics
             min_samples: Minimum samples needed before using adaptive thresholds
+            mode: 'window' (rolling mean/std) or 'ewma' (exponential moving average)
+            alpha: EWMA smoothing factor in (0,1]; higher reacts faster (used when mode='ewma')
         """
         self.tau = tau
         self.window_size = window_size
         self.min_samples = min_samples
+        self.mode = (mode or "window").lower()
+        if self.mode not in ("window", "ewma"):
+            self.mode = "window"
+        # Bound alpha to (0,1]
+        self.alpha = max(1e-6, min(1.0, float(alpha)))
         
         # History of metrics (for computing μ and σ)
         self.metric_history = {
@@ -54,6 +62,13 @@ class AdaptiveThresholdManager:
             "label_shift": {"mu": 0.0, "sigma": 0.1},
             "accuracy_drop": {"mu": 0.0, "sigma": 0.05}
         }
+        # EWMA state (used when mode='ewma'): store E[x] and E[x^2]
+        self._ewma = {
+            "prototype_shift": {"mx": None, "mx2": None},
+            "feature_shift": {"mx": None, "mx2": None},
+            "label_shift": {"mx": None, "mx2": None},
+            "accuracy_drop": {"mx": None, "mx2": None},
+        }
         
         # Calibration phase flag
         self.calibrated = False
@@ -69,20 +84,42 @@ class AdaptiveThresholdManager:
         if metric_name not in self.metric_history:
             return
         
-        history = self.metric_history[metric_name]
-        history.append(float(value))
-        
-        # Maintain rolling window
-        if len(history) > self.window_size:
-            history.pop(0)
-        
-        # Recompute μ and σ if we have enough samples
-        if len(history) >= self.min_samples:
-            self.baselines[metric_name]["mu"] = np.mean(history)
-            self.baselines[metric_name]["sigma"] = max(np.std(history), 1e-8)  # Avoid division by zero
-            
-            if len(history) >= self.window_size:
+        x = float(value)
+        if self.mode == "ewma":
+            st = self._ewma[metric_name]
+            # Initialize on first observation
+            if st["mx"] is None:
+                st["mx"] = x
+                st["mx2"] = x * x
+            else:
+                a = self.alpha
+                st["mx"]  = (1.0 - a) * st["mx"]  + a * x
+                st["mx2"] = (1.0 - a) * st["mx2"] + a * (x * x)
+            # Convert EWMA moments to mean/std
+            mu = float(st["mx"])
+            var = float(max(st["mx2"] - mu * mu, 1e-12))
+            self.baselines[metric_name]["mu"] = mu
+            self.baselines[metric_name]["sigma"] = np.sqrt(var)
+            # Calibrated after a few steps (heuristic: >= min_samples)
+            history = self.metric_history[metric_name]
+            history.append(x)
+            if len(history) > self.window_size:
+                history.pop(0)
+            if len(history) >= self.min_samples:
                 self.calibrated = True
+        else:
+            # Windowed mode (original)
+            history = self.metric_history[metric_name]
+            history.append(x)
+            # Maintain rolling window
+            if len(history) > self.window_size:
+                history.pop(0)
+            # Recompute μ and σ if we have enough samples
+            if len(history) >= self.min_samples:
+                self.baselines[metric_name]["mu"] = np.mean(history)
+                self.baselines[metric_name]["sigma"] = max(np.std(history), 1e-8)
+                if len(history) >= self.window_size:
+                    self.calibrated = True
     
     def get_threshold(self, metric_name):
         """
@@ -358,8 +395,12 @@ class AdaptiveThresholdManager:
 # Convenience functions for common use cases
 
 def create_adaptive_manager(tau=3.0, window_size=10):
-    """Create a standard adaptive threshold manager"""
-    return AdaptiveThresholdManager(tau=tau, window_size=window_size)
+    """Create a standard adaptive threshold manager (windowed)."""
+    return AdaptiveThresholdManager(tau=tau, window_size=window_size, mode="window")
+
+def create_adaptive_manager_ewma(tau=3.0, alpha=0.2):
+    """Create an EWMA adaptive threshold manager."""
+    return AdaptiveThresholdManager(tau=tau, mode="ewma", alpha=alpha)
 
 
 def detect_drift_simple(manager, prototype_shift, label_shift, accuracy_drop):

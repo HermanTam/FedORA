@@ -57,10 +57,18 @@ def parse_args(args_list=None):
     parser.add_argument('--objective_assignment', type=str, default=None,
                         help='OPTIONAL: assign objectives: first_half:G,second_half:P | all:G | all:P | random_50_50')
 
+    # Responsibility prior source: original (train-aligned) vs validation-aligned (generalized)
+    parser.add_argument('--prior_source', choices=['train', 'val'], default='train',
+                        help='Use train-aligned (original) or validation-aligned label priors in responsibility L')
+
     # Adaptive thresholds
-    parser.add_argument('--adaptive_thresholds', action='store_true', help='use adaptive drift thresholds (mu+tau*sigma)')
-    parser.add_argument('--threshold_tau', type=float, default=3.0, help='tau for adaptive thresholds')
-    parser.add_argument('--threshold_window', type=int, default=10, help='baseline rolling window')
+    parser.add_argument('--adaptive_thresholds', action='store_true', help='use adaptive drift thresholds (μ+τσ)')
+    parser.add_argument('--threshold_tau', type=float, default=3.0, help='tau (τ) for adaptive thresholds')
+    parser.add_argument('--threshold_window', type=int, default=10, help='rolling window size when mode=window')
+    parser.add_argument('--threshold_mode', type=str, choices=['window', 'ewma'], default='window',
+                        help='adaptive baseline mode: window (rolling mean/std) or ewma (exponential moving average)')
+    parser.add_argument('--threshold_alpha', type=float, default=0.2,
+                        help='EWMA smoothing factor α in (0,1]; higher reacts faster (mode=ewma)')
     parser.add_argument('--use_statistical_tests', action='store_true', help='use chi-square & KS tests instead of mu+tau*sigma')
 
     # Differential Privacy
@@ -69,6 +77,48 @@ def parse_args(args_list=None):
     parser.add_argument('--dp_delta', type=float, default=1e-5, help='DP delta')
     parser.add_argument('--dp_mechanism', type=str, choices=['gaussian', 'laplace'], default='gaussian', help='DP mechanism')
     parser.add_argument('--dp_max_norm', type=float, default=10.0, help='DP clipping bound')
+
+    # Data paths
+    parser.add_argument('--data_dir', type=str, default='cifar10-c-60_client-simple2-iid-4concept-change-name-version2',
+                        help='dataset directory name (relative to ./data/)')
+    parser.add_argument('--data_root', type=str, default=None,
+                        help='full path to data root (overrides --data_dir if set)')
+    
+    # Drift detection method
+    parser.add_argument('--drift_detector', type=str, choices=['prototype', 'metrics'], default='prototype',
+                        help='drift detection method: "prototype" (original cluster-based) or "metrics" (permutation-based multiclass)')
+    parser.add_argument('--adaptive_method', type=str, choices=['none', 'ewma', 'median_mad'], default='none',
+                        help='adaptive threshold method for metrics detector')
+    parser.add_argument('--adaptive_k', type=float, default=2.0,
+                        help='multiplier for adaptive thresholds (k * std or k * MAD)')
+    parser.add_argument('--adaptive_window', type=int, default=5,
+                        help='window size for adaptive threshold history')
+    parser.add_argument('--adaptive_warmup', type=int, default=2,
+                        help='number of slots before adaptive thresholds activate')
+    
+    # Fixed thresholds for metrics detector
+    parser.add_argument('--tau_label', type=float, default=0.3,
+                        help='threshold for label shift (L1 distance)')
+    parser.add_argument('--tau_feat', type=float, default=0.3,
+                        help='threshold for feature shift (mean L2 distance)')
+    parser.add_argument('--tau_perm', type=float, default=0.1,
+                        help='threshold for permutation gain (concept detection)')
+    
+    # Continual Learning Strategy
+    parser.add_argument('--cl_strategy', type=str, choices=['naive_rehearsal', 'experience_replay'], 
+                        default='naive_rehearsal',
+                        help='continual learning strategy: "naive_rehearsal" (merge t-1 + t) or "experience_replay" (reservoir sampling)')
+    parser.add_argument('--er_buffer_size', type=int, default=500,
+                        help='experience replay buffer size (samples per client)')
+    parser.add_argument('--er_sample_mode', type=str, choices=['uniform', 'reservoir'], 
+                        default='reservoir',
+                        help='experience replay sampling: "uniform" (random from buffer) or "reservoir" (reservoir sampling)')
+    
+    # Drift-type-aware rotation (multiclass datasets)
+    parser.add_argument('--respect_drift_types', action='store_true',
+                        help='use drift_type tags from dataset to control rotation (for multiclass datasets)')
+    parser.add_argument('--rotate_concept_drift', action='store_true',
+                        help='apply rotation to concept drift clients (creates compound drift)')
 
     # Global eval & ablations
     parser.add_argument('--global_eval', action='store_true', default=True, help='evaluate on fixed 0° global test set (default ON)')
@@ -97,6 +147,9 @@ def parse_args(args_list=None):
     parser.add_argument('--em_step', type=int, default=1, help='EM update interval (steps)')
     parser.add_argument('--n_gmm', type=int, default=1, help='number of GMM components')
     parser.add_argument('--T', type=int, default=2, help='number of time slots (concept drift)')
+    # Stability / logging controls
+    parser.add_argument('--no_tensorboard', action='store_true',
+                        help='disable TensorBoard logging (use text summaries only)')
 
     args = parser.parse_args(args_list) if args_list else parser.parse_args()
     return args

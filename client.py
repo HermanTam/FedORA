@@ -8,6 +8,7 @@ import numpy as np
 from scipy.spatial.distance import cdist
 from torch.utils.data import DataLoader, ConcatDataset
 from datasets import MergedDataset,RotateMergedDataset,Rotate120MergedDataset,Rotate120MergedDatasetFmnist
+from utils.experience_replay import ExperienceReplayBuffer, merge_buffer_with_current
 
 from itertools import chain
 
@@ -60,7 +61,11 @@ class Client(object):
             tune_locally=False,
             data_type = 0,
             feature_types = None,
-            class_number = 10
+            class_number = 10,
+            cl_strategy='naive_rehearsal',
+            er_buffer_size=500,
+            er_sample_mode='reservoir',
+            prior_source='train'
     ):
 
         self.learners_ensemble = learners_ensemble 
@@ -71,6 +76,18 @@ class Client(object):
         self.cluster = torch.ones(self.n_learners) / self.n_learners 
         self.class_number = class_number 
         self.global_learners_ensemble = None 
+        # Responsibility prior selection: 'train' (original) or 'val' (generalized)
+        self.prior_source = prior_source
+        
+        # Continual Learning Strategy
+        self.cl_strategy = cl_strategy
+        self.er_buffer = None
+        if cl_strategy == 'experience_replay':
+            self.er_buffer = ExperienceReplayBuffer(
+                max_size=er_buffer_size,
+                sample_mode=er_sample_mode
+            )
+            print(f"  Client initialized with ER buffer: {self.er_buffer}")
 
         if self.tune_locally:
             self.tuned_learners_ensemble = deepcopy(self.learners_ensemble) 
@@ -546,22 +563,27 @@ class FedRC(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        
-        # Build validation-aligned label weights to match all_losses size
-        n_val = len(self.val_iterator.dataset)
-        if self.labels_weights.shape[1] != n_val:
-            lw_val = torch.zeros(self.n_learners, n_val)
-            try:
-                val_labels = self.val_iterator.dataset.targets
-                if hasattr(val_labels, 'tolist'):
-                    val_labels = val_labels.tolist()
-                for i, y in enumerate(val_labels):
-                    lw_val[:, i] = self.labels_learner_weights[:, int(y)]
-            except Exception:
-                lw_val[:] = 1.0 / self.n_learners
-            labels_weights_T = lw_val.T.clamp(min=1e-8)
-        else:
+
+        # Select prior source for responsibility computation
+        if getattr(self, 'prior_source', 'train') == 'train':
+            # Original FedDAA behavior: use train-aligned per-sample priors
             labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        else:
+            # Generalized behavior: build validation-aligned priors by projecting class-wise weights
+            n_val = len(self.val_iterator.dataset)
+            if self.labels_weights.shape[1] != n_val:
+                lw_val = torch.zeros(self.n_learners, n_val)
+                try:
+                    val_labels = self.val_iterator.dataset.targets
+                    if hasattr(val_labels, 'tolist'):
+                        val_labels = val_labels.tolist()
+                    for i, y in enumerate(val_labels):
+                        lw_val[:, i] = self.labels_learner_weights[:, int(y)]
+                except Exception:
+                    lw_val[:] = 1.0 / self.n_learners
+                labels_weights_T = lw_val.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
 
         L = - all_losses.T - torch.log(labels_weights_T)
 
@@ -601,6 +623,7 @@ class FedRC_Concept_Drift(Client):
             data_type=0,
             feature_types=None,
             class_number=10,
+            prior_source='train',
 
     ):
         super().__init__(learners_ensemble,
@@ -612,7 +635,8 @@ class FedRC_Concept_Drift(Client):
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_types,
-            class_number=class_number,)
+            class_number=class_number,
+            prior_source=prior_source)
         self.last_train_iterator = copy.deepcopy(last_train_iterator)
         self.last_val_iterator = copy.deepcopy(last_val_iterator)
         self.last_test_iterator = copy.deepcopy(last_test_iterator)
@@ -897,6 +921,7 @@ class FedRC_Concept_Drift_version2(Client):
             last_data_type=0,
             last_feature_types = None,
             class_number=10,
+            prior_source='train',
 
     ):
         super().__init__(learners_ensemble,
@@ -908,7 +933,8 @@ class FedRC_Concept_Drift_version2(Client):
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_types,
-            class_number=class_number,)
+            class_number=class_number,
+            prior_source=prior_source)
         self.last_train_iterator = copy.deepcopy(last_train_iterator)
         self.last_val_iterator = copy.deepcopy(last_val_iterator)
         self.last_test_iterator = copy.deepcopy(last_test_iterator)
@@ -1190,6 +1216,141 @@ class FedRC_Concept_Drift_version2(Client):
         # print(f"Number of test samples: {len(merged_test_iterator.dataset)}")
 
         return merged_train_iterator,merged_val_iterator,merged_test_iterator
+    
+    # ========================================================================
+    # Experience Replay Methods
+    # ========================================================================
+    
+    def get_er_merge_train_iterators(self, time_slot=None):
+        """
+        Get merged iterators using Experience Replay buffer.
+        
+        For Experience Replay:
+        - Buffer contains samples from ALL past time slots (t=0,1,2,...,t-1)
+        - Current data is from time slot t
+        - Training merges: Buffer + Current
+        
+        This differs from naive rehearsal which only merges t-1 + t.
+        
+        Parameters
+        ----------
+        time_slot : int, optional
+            Current time slot (for logging)
+        
+        Returns
+        -------
+        tuple
+            (merged_train_iterator, merged_val_iterator, merged_test_iterator)
+        """
+        # Add current data to ER buffer (reservoir sampling)
+        if self.er_buffer is not None:
+            self.er_buffer.add_samples(
+                self.current_train_iterator.dataset,
+                time_slot=time_slot
+            )
+        
+        # Merge buffer with current data
+        train_datasets = []
+        if self.er_buffer is not None and len(self.er_buffer) > 0:
+            buffered_dataset = self.er_buffer.get_all()
+            if buffered_dataset is not None:
+                train_datasets.append(buffered_dataset)
+        train_datasets.append(copy.deepcopy(self.current_train_iterator.dataset))
+        
+        # For validation/test: only use current (not historical)
+        val_datasets = [copy.deepcopy(self.current_val_iterator.dataset)]
+        test_datasets = [copy.deepcopy(self.current_test_iterator.dataset)]
+        
+        # Create merged datasets
+        merged_train_dataset = MergedDataset(train_datasets)
+        merged_val_dataset = MergedDataset(val_datasets)
+        merged_test_dataset = MergedDataset(test_datasets)
+        
+        # Create data loaders
+        merged_train_iterator = DataLoader(
+            merged_train_dataset,
+            batch_size=self.current_train_iterator.batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+        merged_val_iterator = DataLoader(
+            merged_val_dataset,
+            batch_size=self.current_val_iterator.batch_size,
+            shuffle=True,
+            drop_last=False
+        )
+        merged_test_iterator = DataLoader(
+            merged_test_dataset,
+            batch_size=self.current_test_iterator.batch_size,
+            shuffle=True,
+            drop_last=False
+        )
+        
+        return merged_train_iterator, merged_val_iterator, merged_test_iterator
+    
+    def rotate_120_get_er_merge_train_iterators(self, rotate_degrees, time_slot=None):
+        """
+        Get merged iterators using Experience Replay buffer with rotation.
+        
+        Same as get_er_merge_train_iterators but applies rotation transform.
+        
+        Parameters
+        ----------
+        rotate_degrees : int
+            Rotation angle (0, 120, 240)
+        time_slot : int, optional
+            Current time slot (for logging)
+        
+        Returns
+        -------
+        tuple
+            (merged_train_iterator, merged_val_iterator, merged_test_iterator)
+        """
+        # Add current data to ER buffer
+        if self.er_buffer is not None:
+            self.er_buffer.add_samples(
+                self.current_train_iterator.dataset,
+                time_slot=time_slot
+            )
+        
+        # Merge buffer with current data
+        train_datasets = []
+        if self.er_buffer is not None and len(self.er_buffer) > 0:
+            buffered_dataset = self.er_buffer.get_all()
+            if buffered_dataset is not None:
+                train_datasets.append(buffered_dataset)
+        train_datasets.append(copy.deepcopy(self.current_train_iterator.dataset))
+        
+        # For validation/test: only use current
+        val_datasets = [copy.deepcopy(self.current_val_iterator.dataset)]
+        test_datasets = [copy.deepcopy(self.current_test_iterator.dataset)]
+        
+        # Create merged datasets with rotation
+        merged_train_dataset = Rotate120MergedDataset(train_datasets, rotate_degrees=rotate_degrees)
+        merged_val_dataset = Rotate120MergedDataset(val_datasets, rotate_degrees=rotate_degrees)
+        merged_test_dataset = Rotate120MergedDataset(test_datasets, rotate_degrees=rotate_degrees)
+        
+        # Create data loaders
+        merged_train_iterator = DataLoader(
+            merged_train_dataset,
+            batch_size=self.current_train_iterator.batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+        merged_val_iterator = DataLoader(
+            merged_val_dataset,
+            batch_size=self.current_val_iterator.batch_size,
+            shuffle=True,
+            drop_last=False
+        )
+        merged_test_iterator = DataLoader(
+            merged_test_dataset,
+            batch_size=self.current_test_iterator.batch_size,
+            shuffle=True,
+            drop_last=False
+        )
+        
+        return merged_train_iterator, merged_val_iterator, merged_test_iterator
 
     def update_train_iterator_and_other_attributes(self,merged_train_iterator, merged_val_iterator, merged_test_iterator):
         # merged_train_iterator, merged_val_iterator, merged_test_iterator = self.get_merge_last_and_current_train_iterators()

@@ -14,6 +14,15 @@ from sklearn.mixture import GaussianMixture
 from torch.utils.data import ConcatDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+# Lightweight no-op TensorBoard replacement for memory-friendly runs
+class NoOpLogger:
+    def add_scalar(self, *args, **kwargs):
+        return None
+    def flush(self, *args, **kwargs):
+        return None
+    def close(self, *args, **kwargs):
+        return None
+
 from utils.args import *
 from utils.constants import *
 from utils.drift_utils import (
@@ -262,7 +271,7 @@ def init_clients(args_, root_path, logs_dir):
 
         logs_path = os.path.join(logs_dir, "task_{}".format(task_id))
         os.makedirs(logs_path, exist_ok=True)
-        logger = SummaryWriter(logs_path)
+        logger = NoOpLogger() if getattr(args_, 'no_tensorboard', False) else SummaryWriter(logs_path)
 
         if CLIENT_TYPE[args_.method] == "conceptEM_tune" and "train" in logs_dir:
 
@@ -278,7 +287,8 @@ def init_clients(args_, root_path, logs_dir):
                 tune_locally=True,
                 data_type = client_types[task_id],
                 feature_type = feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                prior_source = getattr(args_, 'prior_source', 'train')
             )
         else:
             
@@ -294,7 +304,8 @@ def init_clients(args_, root_path, logs_dir):
                 tune_locally=args_.locally_tune_clients,
                 data_type = client_types[task_id],
                 feature_type = feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                prior_source = getattr(args_, 'prior_source', 'train')
             )
 
         clients_.append(client) 
@@ -611,7 +622,8 @@ def get_data_iterator_for_store_data_rotate_images(args_,data_indexes,root_path,
                     data_indexes = data_indexes,
                     rotate_degrees=rotate_degrees,
                     test = True,
-                    test_num = 3
+                    test_num = 3,
+                    respect_drift_types=args_.respect_drift_types
                 )
         else: 
             train_iterators, val_iterators, test_iterators, client_types, feature_types =\
@@ -620,7 +632,8 @@ def get_data_iterator_for_store_data_rotate_images(args_,data_indexes,root_path,
                     batch_size=args_.bz,
                     is_validation=args_.validation,
                     data_indexes=data_indexes,
-                    rotate_degrees=rotate_degrees
+                    rotate_degrees=rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
     elif LOADER_TYPE[args_.experiment] == 'tiny-imagenet-c':
         if 'test' in root_path:
@@ -950,7 +963,7 @@ def init_clients_for_store_history(args_, last_data_indexes, current_data_indexe
 
         logs_path = os.path.join(logs_dir, "task_{}".format(task_id))
         os.makedirs(logs_path, exist_ok=True)
-        logger = SummaryWriter(logs_path)
+        logger = NoOpLogger() if getattr(args_, 'no_tensorboard', False) else SummaryWriter(logs_path)
 
         if CLIENT_TYPE[args_.method] == "conceptEM_tune" and "train" in logs_dir:
           
@@ -966,7 +979,8 @@ def init_clients_for_store_history(args_, last_data_indexes, current_data_indexe
                 tune_locally=True,
                 data_type = client_types[task_id],
                 feature_type = feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                prior_source = getattr(args_, 'prior_source', 'train')
             )
         else:
 
@@ -985,7 +999,8 @@ def init_clients_for_store_history(args_, last_data_indexes, current_data_indexe
                 tune_locally=args_.locally_tune_clients,
                 data_type = client_types[task_id],
                 feature_type = feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                prior_source = getattr(args_, 'prior_source', 'train')
             )
 
         clients_.append(client) 
@@ -1019,7 +1034,8 @@ def rot_120deg_init_50_client_store_history_simple2_iid_auto_clst_num\
                     is_validation=args_.validation,
                     test = True,
                     test_num = cluster_num,
-                    rotate_degrees=rotate_degrees
+                    rotate_degrees=rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
 
             
@@ -1037,7 +1053,8 @@ def rot_120deg_init_50_client_store_history_simple2_iid_auto_clst_num\
                     batch_size=args_.bz,
                     is_validation=args_.validation, 
                     data_indexes = current_data_indexes,
-                    rotate_degrees = rotate_degrees
+                    rotate_degrees = rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
             last_train_iterators, last_val_iterators, last_test_iterators, last_client_types, last_feature_types =\
                 get_cifar10C_loaders_for_store_history_rotate_images(
@@ -1045,7 +1062,8 @@ def rot_120deg_init_50_client_store_history_simple2_iid_auto_clst_num\
                     batch_size=args_.bz,
                     is_validation=args_.validation, 
                     data_indexes = last_data_indexes,
-                    rotate_degrees= rotate_degrees-120
+                    rotate_degrees= rotate_degrees-120,
+                    respect_drift_types=args_.respect_drift_types
                 )
     elif LOADER_TYPE[args_.experiment] == 'tiny-imagenet-c':
         if 'test' in root_path:
@@ -1213,7 +1231,7 @@ def rot_120deg_init_50_client_store_history_simple2_iid_auto_clst_num\
 
         logs_path = os.path.join(logs_dir, "task_{}".format(task_id))
         os.makedirs(logs_path, exist_ok=True)
-        logger = SummaryWriter(logs_path)
+        logger = NoOpLogger() if getattr(args_, 'no_tensorboard', False) else SummaryWriter(logs_path)
 
         if CLIENT_TYPE[args_.method] == "conceptEM_tune" and "train" in logs_dir:
            
@@ -1229,7 +1247,8 @@ def rot_120deg_init_50_client_store_history_simple2_iid_auto_clst_num\
                 tune_locally=True,
                 data_type = client_types[task_id],
                 feature_type = feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                prior_source = getattr(args_, 'prior_source', 'train')
             )
         else:
 
@@ -1283,7 +1302,8 @@ def update_client_data_loaders(clients, last_data_indexes, current_data_indexes,
                     is_validation=args_.validation,
                     test=True,
                     test_num=test_num,
-                    rotate_degrees=rotate_degrees
+                    rotate_degrees=rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
             last_train_iterators = train_iterators
             last_val_iterators = val_iterators
@@ -1297,7 +1317,8 @@ def update_client_data_loaders(clients, last_data_indexes, current_data_indexes,
                     batch_size=args_.bz,
                     is_validation=args_.validation,
                     data_indexes=current_data_indexes,
-                    rotate_degrees=rotate_degrees
+                    rotate_degrees=rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
             last_train_iterators, last_val_iterators, last_test_iterators, last_client_types, last_feature_types = \
                 get_cifar10C_loaders_for_store_history_rotate_images(
@@ -1305,7 +1326,8 @@ def update_client_data_loaders(clients, last_data_indexes, current_data_indexes,
                     batch_size=args_.bz,
                     is_validation=args_.validation,
                     data_indexes=last_data_indexes,
-                    rotate_degrees=rotate_degrees - 120
+                    rotate_degrees=rotate_degrees - 120,
+                    respect_drift_types=args_.respect_drift_types
                 )
     
     # Update each client's data iterators
@@ -1331,7 +1353,7 @@ def update_client_data_loaders(clients, last_data_indexes, current_data_indexes,
             client.last_val_iterator = last_val_iterators[idx]
             client.last_test_iterator = last_test_iterators[idx]
             client.last_data_type = last_client_types[idx]
-            client.last_feature_type = last_feature_types[idx]
+            client.last_feature_types = last_feature_types[idx]
     
     print(f"===> Updated {len(clients)} clients with new data loaders")
 
@@ -1362,7 +1384,8 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
                     is_validation=args_.validation,
                     test = True,
                     test_num = test_num,
-                    rotate_degrees=rotate_degrees
+                    rotate_degrees=rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
 
 
@@ -1382,7 +1405,8 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
                     batch_size=args_.bz,
                     is_validation=args_.validation,
                     data_indexes = current_data_indexes,
-                    rotate_degrees = rotate_degrees
+                    rotate_degrees = rotate_degrees,
+                    respect_drift_types=args_.respect_drift_types
                 )
             last_train_iterators, last_val_iterators, last_test_iterators, last_client_types, last_feature_types =\
                 get_cifar10C_loaders_for_store_history_rotate_images(
@@ -1390,7 +1414,8 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
                     batch_size=args_.bz,
                     is_validation=args_.validation, 
                     data_indexes = last_data_indexes,
-                    rotate_degrees= rotate_degrees-120
+                    rotate_degrees= rotate_degrees-120,
+                    respect_drift_types=args_.respect_drift_types
                 )
     elif LOADER_TYPE[args_.experiment] == 'tiny-imagenet-c':
         if 'test' in root_path:
@@ -1558,7 +1583,7 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
 
         logs_path = os.path.join(logs_dir, "task_{}".format(task_id))
         os.makedirs(logs_path, exist_ok=True)
-        logger = SummaryWriter(logs_path)
+        logger = NoOpLogger() if getattr(args_, 'no_tensorboard', False) else SummaryWriter(logs_path)
 
         if CLIENT_TYPE[args_.method] == "conceptEM_tune" and "train" in logs_dir:
            
@@ -1574,10 +1599,15 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
                 tune_locally=True,
                 data_type = client_types[task_id],
                 feature_type = feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                prior_source = getattr(args_, 'prior_source', 'train')
             )
         else:
-  
+            # Pass CL strategy parameters from args
+            cl_strategy = getattr(args_, 'cl_strategy', 'naive_rehearsal')
+            er_buffer_size = getattr(args_, 'er_buffer_size', 500)
+            er_sample_mode = getattr(args_, 'er_sample_mode', 'reservoir')
+            
             client = get_client_for_store_history_version_2(
                 client_type=CLIENT_TYPE[args_.method],
                 learners_ensemble=learners_ensemble,
@@ -1595,7 +1625,10 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
                 feature_type = feature_types[task_id],
                 last_data_type = last_client_types[task_id],
                 last_feature_type= last_feature_types[task_id],
-                class_number = class_number
+                class_number = class_number,
+                cl_strategy=cl_strategy,
+                er_buffer_size=er_buffer_size,
+                er_sample_mode=er_sample_mode
             )
 
         clients_.append(client) 
@@ -1673,89 +1706,159 @@ def check_whether_clients_concept_shifts_cluster_center_based(
         clients,
         cluster_centers,
         diagnosis_mode='binary',
-        thresholds=None):
+        thresholds=None,
+        drift_detector='prototype',
+        adaptive_manager=None):
     """
+    Detect drift using either prototype clustering or permutation-based metrics.
 
     Parameters
     ----------
-    clients
+    clients : list
+        List of client objects
+    cluster_centers : np.array
+        Cluster centers for prototype method
+    diagnosis_mode : str
+        'binary' or 'multiclass'
+    thresholds : dict
+        Threshold values for detection
+    drift_detector : str
+        'prototype' (original) or 'metrics' (permutation-based)
+    adaptive_manager : AdaptiveThresholdManager
+        For adaptive thresholds (metrics detector only)
 
     Returns
     -------
-    shift_set,clean_set,drift_types,drift_metrics
+    shift_set, clean_set, drift_types, drift_metrics
     """
+    from utils.drift_metrics import diagnose_drift_multiclass
+    
     shift_set = []
     clean_set = []
     drift_types = {}
     drift_metrics = {}
+    
+    # Extract thresholds
+    if thresholds is None:
+        thresholds = {}
+    tau_label = thresholds.get('tau_label', 0.3)
+    tau_feat = thresholds.get('tau_feat', 0.3)
+    tau_perm = thresholds.get('tau_perm', 0.1)
+    
     for i, client in enumerate(clients):
-      
         last_prototype = client.get_last_val_iterator_output_prototype()
         current_prototype = client.get_current_val_iterator_output_prototype()
-
-  
+        
         last_prototype = np.array(last_prototype)
         current_prototype = np.array(current_prototype)
-
-
-        if last_prototype.ndim >1:
-          
-            last_prototype = last_prototype.flatten()
-
-        if current_prototype.ndim >1:
-         
-            current_prototype = current_prototype.flatten()
-      
-        last_predicted_cluster = predict_cluster(last_prototype, cluster_centers)
-        current_predicted_cluster = predict_cluster(current_prototype, cluster_centers)
-
-        print("client:",i)
-        print("last_predicted_cluster",last_predicted_cluster)
-        print("current_predicted_cluster",current_predicted_cluster)
-        cluster_changed = last_predicted_cluster != current_predicted_cluster
-
-        metrics = {
-            "prototype_shift": prototype_shift(last_prototype, current_prototype),
-            "cluster_changed": float(cluster_changed),
-            "label_shift": 0.0,
-            "feature_shift": 0.0,
-            "accuracy_drop": 0.0,
-            "last_acc_shared": 0.0,
-            "current_acc_shared": 0.0,
-        }
-
-        if diagnosis_mode == 'multiclass':
-            last_dist = client.get_last_label_distribution()
-            current_dist = client.get_current_label_distribution()
-            metrics["label_shift"] = label_distribution_shift(last_dist, current_dist, metric="l1")
-
-            last_logits, last_labels = client.get_last_features_and_labels()
-            current_logits, current_labels = client.get_current_features_and_labels()
-
-            if last_logits.size and current_logits.size:
-                metrics["feature_shift"] = float(
-                    np.linalg.norm(np.mean(last_logits, axis=0) - np.mean(current_logits, axis=0))
+        
+        # Determine if using metrics detector
+        if drift_detector == 'metrics':
+            # Keep 2D shape for per-class analysis (C x D)
+            if last_prototype.ndim > 2:
+                # Reshape from (C, H, W, D) to (C, H*W*D)
+                C = last_prototype.shape[0]
+                last_prototype = last_prototype.reshape(C, -1)
+                current_prototype = current_prototype.reshape(C, -1)
+            elif last_prototype.ndim == 1:
+                # Expand to (1, D)
+                last_prototype = last_prototype.reshape(1, -1)
+                current_prototype = current_prototype.reshape(1, -1)
+            
+            # Get adaptive thresholds if available
+            if adaptive_manager is not None:
+                tau_label, tau_feat, tau_perm = adaptive_manager.get_thresholds(
+                    i, tau_label, tau_feat, tau_perm
                 )
-
-            accuracy_drop, last_acc, current_acc = shared_label_accuracy_drop(
-                last_logits, last_labels, current_logits, current_labels
+            
+            # Diagnose using permutation-based metrics
+            drift_type, metrics = diagnose_drift_multiclass(
+                last_prototype,
+                current_prototype,
+                client.last_val_iterator,
+                client.current_val_iterator,
+                C=client.class_number,
+                tau_label=tau_label,
+                tau_feat=tau_feat,
+                tau_perm=tau_perm
             )
-            metrics["accuracy_drop"] = accuracy_drop
-            metrics["last_acc_shared"] = last_acc
-            metrics["current_acc_shared"] = current_acc
-
-            drift_type = diagnose_drift_type(metrics, thresholds=thresholds, cluster_changed=cluster_changed)
+            
+            # Update adaptive manager (only on clean predictions to prevent contamination)
+            if adaptive_manager is not None and drift_type == 'none':
+                adaptive_manager.update(
+                    i,
+                    metrics['label_shift'],
+                    metrics['feature_shift'],
+                    metrics['perm_gain']
+                )
+            
+            # Add cluster info for compatibility
+            last_prototype_flat = last_prototype.flatten()
+            current_prototype_flat = current_prototype.flatten()
+            last_predicted_cluster = predict_cluster(last_prototype_flat, cluster_centers)
+            current_predicted_cluster = predict_cluster(current_prototype_flat, cluster_centers)
+            cluster_changed = last_predicted_cluster != current_predicted_cluster
+            
+            metrics['cluster_changed'] = float(cluster_changed)
+            metrics['prototype_shift'] = prototype_shift(last_prototype_flat, current_prototype_flat)
+            
         else:
-            drift_type = 'real' if cluster_changed else 'none'
-
+            # Original prototype detector
+            if last_prototype.ndim > 1:
+                last_prototype = last_prototype.flatten()
+            if current_prototype.ndim > 1:
+                current_prototype = current_prototype.flatten()
+            
+            last_predicted_cluster = predict_cluster(last_prototype, cluster_centers)
+            current_predicted_cluster = predict_cluster(current_prototype, cluster_centers)
+            
+            print("client:", i)
+            print("last_predicted_cluster", last_predicted_cluster)
+            print("current_predicted_cluster", current_predicted_cluster)
+            cluster_changed = last_predicted_cluster != current_predicted_cluster
+            
+            metrics = {
+                "prototype_shift": prototype_shift(last_prototype, current_prototype),
+                "cluster_changed": float(cluster_changed),
+                "label_shift": 0.0,
+                "feature_shift": 0.0,
+                "accuracy_drop": 0.0,
+                "last_acc_shared": 0.0,
+                "current_acc_shared": 0.0,
+            }
+            
+            if diagnosis_mode == 'multiclass':
+                last_dist = client.get_last_label_distribution()
+                current_dist = client.get_current_label_distribution()
+                metrics["label_shift"] = label_distribution_shift(last_dist, current_dist, metric="l1")
+                
+                last_logits, last_labels = client.get_last_features_and_labels()
+                current_logits, current_labels = client.get_current_features_and_labels()
+                
+                if last_logits.size and current_logits.size:
+                    metrics["feature_shift"] = float(
+                        np.linalg.norm(np.mean(last_logits, axis=0) - np.mean(current_logits, axis=0))
+                    )
+                
+                accuracy_drop, last_acc, current_acc = shared_label_accuracy_drop(
+                    last_logits, last_labels, current_logits, current_labels
+                )
+                metrics["accuracy_drop"] = accuracy_drop
+                metrics["last_acc_shared"] = last_acc
+                metrics["current_acc_shared"] = current_acc
+                
+                drift_type = diagnose_drift_type(metrics, thresholds=thresholds, cluster_changed=cluster_changed)
+            else:
+                drift_type = 'real' if cluster_changed else 'none'
+        
         if drift_type == 'none':
             clean_set.append(i)
         else:
             shift_set.append(i)
-
+        
         drift_types[i] = drift_type
         drift_metrics[i] = metrics
-
+    
     return shift_set, clean_set, drift_types, drift_metrics
 
 
@@ -1823,41 +1926,70 @@ def set_clients_concept_shift_flag(clients,shift_set):
         else:
             client.set_concept_shift_flag(0)
 
-def update_clients_train_iterator_and_other_attribute(clients):
+def update_clients_train_iterator_and_other_attribute(clients, current_time_slot=None):
+    """
+    Update client training iterators based on continual learning strategy.
+    
+    Parameters
+    ----------
+    clients : list
+        List of client objects
+    current_time_slot : int, optional
+        Current time slot (for ER logging)
+    """
     for client in clients:
         if client.concept_shift_flag==0:
-          
-            merged_train_iterator, merged_val_iterator, merged_test_iterator = \
-                client.get_merge_last_and_current_train_iterators()
+            # Clean clients (no drift) - use continual learning
+            if hasattr(client, 'cl_strategy') and client.cl_strategy == 'experience_replay':
+                # Experience Replay: merge buffer + current
+                merged_train_iterator, merged_val_iterator, merged_test_iterator = \
+                    client.get_er_merge_train_iterators(time_slot=current_time_slot)
+            else:
+                # Naive Rehearsal (default): merge t-1 + t
+                merged_train_iterator, merged_val_iterator, merged_test_iterator = \
+                    client.get_merge_last_and_current_train_iterators()
+            
             client.update_train_iterator_and_other_attributes(merged_train_iterator, merged_val_iterator,
                                                               merged_test_iterator)
         else:
-      
+            # Shifted clients (drift detected) - reset to current only
             client.update_train_iterator_and_other_attributes(client.current_train_iterator, client.current_val_iterator,
                                                               client.current_test_iterator)
 
 
-def rotate_120degree_update_clients_train_iterator_and_other_attribute(clients,rotate_degrees):
+def rotate_120degree_update_clients_train_iterator_and_other_attribute(clients,rotate_degrees, current_time_slot=None):
     """
+    Update client training iterators with rotation based on continual learning strategy.
 
     Parameters
     ----------
-    clients
-    rotate_degrees
+    clients : list
+        List of client objects
+    rotate_degrees : int
+        Rotation angle (0, 120, 240)
+    current_time_slot : int, optional
+        Current time slot (for ER logging)
 
     Returns
     -------
-
+    None
     """
     for client in clients:
         if client.concept_shift_flag == 0:
-           
-            merged_train_iterator, merged_val_iterator, merged_test_iterator = \
-                client.rotate_120_get_merge_last_and_current_train_iterators(rotate_degrees=rotate_degrees)
+            # Clean clients - use continual learning
+            if hasattr(client, 'cl_strategy') and client.cl_strategy == 'experience_replay':
+                # Experience Replay: merge buffer + current with rotation
+                merged_train_iterator, merged_val_iterator, merged_test_iterator = \
+                    client.rotate_120_get_er_merge_train_iterators(rotate_degrees=rotate_degrees, time_slot=current_time_slot)
+            else:
+                # Naive Rehearsal (default): merge t-1 + t with rotation
+                merged_train_iterator, merged_val_iterator, merged_test_iterator = \
+                    client.rotate_120_get_merge_last_and_current_train_iterators(rotate_degrees=rotate_degrees)
+            
             client.update_train_iterator_and_other_attributes(merged_train_iterator, merged_val_iterator,
                                                               merged_test_iterator)
         else:   
-    
+            # Shifted clients - reset to current only
             client.update_train_iterator_and_other_attributes(client.current_train_iterator, client.current_val_iterator,
                                                               client.current_test_iterator)
 
@@ -1954,8 +2086,52 @@ def run_experiment(args_, exp_logger=None):
         )
         print(f"==> DP enabled: ε={dp_manager.epsilon}, δ={dp_manager.delta}, mechanism={dp_manager.mechanism}")
 
-    data_dir = get_data_dir('cifar10-c-60_client-simple2-iid-4concept-change-name-version2')
-    data_root_path = './data/cifar10-c-60_client-simple2-iid-4concept-change-name-version2'
+    # Configure data paths from CLI args
+    if hasattr(args_, 'data_root') and args_.data_root is not None:
+        data_root_path = args_.data_root
+    else:
+        data_dir_name = getattr(args_, 'data_dir', 'cifar10-c-60_client-simple2-iid-4concept-change-name-version2')
+        data_root_path = f'./data/{data_dir_name}'
+    
+    data_dir = get_data_dir(os.path.basename(data_root_path))
+    print(f"==> Using data path: {data_root_path}")
+    
+    # Initialize adaptive threshold manager (for metrics detector)
+    adaptive_manager = None
+    if getattr(args_, 'drift_detector', 'prototype') == 'metrics' and getattr(args_, 'adaptive_method', 'none') != 'none':
+        from utils.drift_metrics import AdaptiveThresholdManager
+        adaptive_manager = AdaptiveThresholdManager(
+            method=args_.adaptive_method,
+            window_size=getattr(args_, 'adaptive_window', 5),
+            k=getattr(args_, 'adaptive_k', 2.0),
+            warm_up=getattr(args_, 'adaptive_warmup', 2)
+        )
+        print(f"==> Adaptive thresholds enabled: method={args_.adaptive_method}, k={args_.adaptive_k}")
+    
+    # Initialize ground truth tracking for confusion matrix
+    ground_truth_drift_types = {}
+    all_predictions = {}  # slot -> {client_id: predicted_drift_type}
+    
+    # Load ground truth from dataset (if using multiclass drift dataset)
+    if 'multiclass-drift' in data_root_path:
+        print("==> Loading ground truth from multiclass drift dataset...")
+        import pickle
+        for client_id in range(60):  # Assuming 60 clients
+            try:
+                with open(f"{data_root_path}/{client_id}.pkl", 'rb') as f:
+                    data = pickle.load(f)
+                    drift_type_key = data.get('drift_type', 'unknown')
+                    # Map to our detection categories
+                    if 'real_drift' in drift_type_key:
+                        ground_truth_drift_types[client_id] = 'concept'
+                    elif 'feature_drift' in drift_type_key:
+                        ground_truth_drift_types[client_id] = 'feature'
+                    elif 'label_drift' in drift_type_key:
+                        ground_truth_drift_types[client_id] = 'label'
+                    elif 'no_drift' in drift_type_key:
+                        ground_truth_drift_types[client_id] = 'none'
+            except Exception as e:
+                print(f"    Warning: Could not load ground truth for client {client_id}: {e}")
 
     if run_paths is not None:
         logs_dir = run_paths["logs"]
@@ -2064,11 +2240,11 @@ def run_experiment(args_, exp_logger=None):
 
     logs_path = os.path.join(logs_dir, "train", "global")
     os.makedirs(logs_path, exist_ok=True)
-    global_train_logger = SummaryWriter(logs_path)
+    global_train_logger = NoOpLogger() if getattr(args_, 'no_tensorboard', False) else SummaryWriter(logs_path)
 
     logs_path = os.path.join(logs_dir, "test", "global")
     os.makedirs(logs_path, exist_ok=True)
-    global_test_logger = SummaryWriter(logs_path)
+    global_test_logger = NoOpLogger() if getattr(args_, 'no_tensorboard', False) else SummaryWriter(logs_path)
 
     # Build a fixed global test iterator (optional)
     global_test_iterator = None
@@ -2397,13 +2573,31 @@ def run_experiment(args_, exp_logger=None):
                 f.write('\n')
 
 
+            # Prepare thresholds for detection
+            detection_thresholds = {
+                'tau_label': getattr(args_, 'tau_label', 0.3),
+                'tau_feat': getattr(args_, 'tau_feat', 0.3),
+                'tau_perm': getattr(args_, 'tau_perm', 0.1)
+            }
+            if not getattr(args_, "adaptive_thresholds", False):
+                detection_thresholds.update(DEFAULT_THRESHOLDS)
+            
             shift_set, clean_set, drift_types, drift_metrics = \
                 check_whether_clients_concept_shifts_cluster_center_based(
                     clients,
                     cluster_centers,
                     diagnosis_mode=args_.diagnosis_mode,
-                    thresholds=None if getattr(args_, "adaptive_thresholds", False) else DEFAULT_THRESHOLDS
+                    thresholds=detection_thresholds,
+                    drift_detector=getattr(args_, 'drift_detector', 'prototype'),
+                    adaptive_manager=adaptive_manager
                 )
+            
+            # Track predictions for confusion matrix
+            all_predictions[t] = drift_types.copy()
+            
+            # Advance adaptive manager slot counter
+            if adaptive_manager is not None:
+                adaptive_manager.advance_slot()
 
             binary_shift_set = [idx for idx, drift_type in drift_types.items() if drift_type == 'real']
             binary_clean_set = [idx for idx in range(len(clients)) if idx not in binary_shift_set]
@@ -2702,6 +2896,58 @@ def run_experiment(args_, exp_logger=None):
     global_train_logger.close()
     global_test_logger.flush()
     global_test_logger.close()
+    
+    # Generate and print confusion matrix (if ground truth available)
+    if ground_truth_drift_types and all_predictions:
+        from utils.drift_metrics import compute_confusion_matrix, print_confusion_matrix
+        
+        # Aggregate predictions across all slots
+        aggregated_predictions = {}
+        for slot_predictions in all_predictions.values():
+            for client_id, pred_type in slot_predictions.items():
+                if client_id not in aggregated_predictions:
+                    aggregated_predictions[client_id] = []
+                aggregated_predictions[client_id].append(pred_type)
+        
+        # Take majority vote per client
+        final_predictions = {}
+        for client_id, preds in aggregated_predictions.items():
+            final_predictions[client_id] = Counter(preds).most_common(1)[0][0]
+        
+        # Compute confusion matrix
+        matrix, classes = compute_confusion_matrix(final_predictions, ground_truth_drift_types)
+        
+        # Print to console
+        print_confusion_matrix(matrix, classes, title="Drift Detection Confusion Matrix")
+        
+        # Save to file
+        confusion_path = logs_base_path / f"confusion_matrix-{args_.drift_detector}-{args_.diagnosis_mode}.txt"
+        with open(confusion_path, 'w') as f:
+            f.write(f"Drift Detector: {getattr(args_, 'drift_detector', 'prototype')}\n")
+            f.write(f"Diagnosis Mode: {args_.diagnosis_mode}\n")
+            if adaptive_manager is not None:
+                f.write(f"Adaptive Thresholds: {args_.adaptive_method} (k={args_.adaptive_k})\n")
+            f.write("\n")
+            
+            # Write matrix
+            f.write("True \\ Predicted\t" + "\t".join(classes) + "\n")
+            for i, true_cls in enumerate(classes):
+                f.write(f"{true_cls}\t" + "\t".join(str(matrix[i, j]) for j in range(len(classes))) + "\n")
+            
+            f.write("\nPer-Class Metrics:\n")
+            for i, cls in enumerate(classes):
+                tp = matrix[i, i]
+                fp = matrix[:, i].sum() - tp
+                fn = matrix[i, :].sum() - tp
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+                f.write(f"{cls}: Precision={precision:.2%}, Recall={recall:.2%}, F1={f1:.2%}\n")
+            
+            accuracy = np.trace(matrix) / matrix.sum() if matrix.sum() > 0 else 0.0
+            f.write(f"\nOverall Accuracy: {accuracy:.2%}\n")
+        
+        print(f"\n✓ Confusion matrix saved to {confusion_path}")
 
     detection_stats = {
         "accuracy": sample_stats(prediction_accuracy_list),

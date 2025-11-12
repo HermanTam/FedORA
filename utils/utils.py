@@ -1086,7 +1086,7 @@ def get_cifar10C_loaders_for_store_history(root_path, batch_size, is_validation,
 def fixed_rotation(angle):
     return lambda img: img.rotate(angle)
 
-def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, is_validation,rotate_degrees,data_indexes=None, test=False, test_num = 3, train_num=300):
+def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, is_validation,rotate_degrees,data_indexes=None, test=False, test_num = 3, train_num=300, respect_drift_types=False):
     """
 
     Parameters
@@ -1099,6 +1099,7 @@ def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, 
     test
     test_num
     train_num
+    respect_drift_types: if True, use drift_type tags from dataset to control rotation
 
     Returns
     -------
@@ -1106,6 +1107,7 @@ def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, 
     """
     train_iterators, val_iterators, test_iterators, client_types, client_features = [], [], [], [], []
 
+    # Default transform (will be overridden per client if respect_drift_types=True)
     transform = Compose([
         fixed_rotation(rotate_degrees),  
         ToTensor(),
@@ -1132,7 +1134,26 @@ def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, 
             train_iterators.append(train_iterator) 
             val_iterators.append(val_iterator)
             test_iterators.append(test_iterator)
-            client_types.append(client['type']) 
+            
+            # Handle both 'type' (legacy numeric) and 'drift_type' (new string format)
+            # Convert string drift_type to numeric for backward compatibility
+            raw_type = client.get('type', client.get('drift_type', 0))
+            if isinstance(raw_type, str):
+                # Map string drift types to numeric codes for data_type field
+                type_map = {
+                    'no_drift': 0,
+                    'label_drift_only': 1,
+                    'feature_drift_only': 2,
+                    'real_drift_map1': 3,
+                    'real_drift_map2': 3,
+                    'real_drift_map3': 3,
+                    'real_drift_map4': 3,
+                }
+                numeric_type = type_map.get(raw_type, 0)
+            else:
+                numeric_type = raw_type
+            
+            client_types.append(numeric_type)
             if 'features' in client:
                 client_features.append(client['features'])
             else:
@@ -1152,6 +1173,35 @@ def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, 
             print("task_data_path:",task_data_path)
             raise ValueError("loaded client is empty.")
 
+        # Determine rotation based on drift_type tag (for multiclass datasets)
+        if respect_drift_types and 'drift_type' in client:
+            drift_type = client['drift_type']
+            if drift_type in {'no_drift', 'label_drift_only'}:
+                # Keep these categories clean: no rotation
+                actual_rotation = 0
+            elif drift_type == 'feature_drift_only':
+                # Apply per-slot rotation for feature drift
+                actual_rotation = rotate_degrees
+            elif drift_type.startswith('real_drift_map'):
+                # Concept drift: default no rotation (pure concept)
+                actual_rotation = 0
+            else:
+                # Fallback to uniform rotation
+                actual_rotation = rotate_degrees
+        else:
+            # Legacy behavior: apply rotation uniformly
+            actual_rotation = rotate_degrees
+        
+        # Create transform with determined rotation
+        transform = Compose([
+            fixed_rotation(actual_rotation),
+            ToTensor(),
+            Normalize(
+                (0.4914, 0.4822, 0.4465),
+                (0.2023, 0.1994, 0.2010)
+            )
+        ])
+
         train_indices, val_indices, test_indices = split_train_val_test(len(client['labels']))
         
         train_dataset = SubCIFAR10C(train_indices, cifar10_data=client['images'], cifar10_targets=client['labels'], transform=transform)
@@ -1169,7 +1219,26 @@ def get_cifar10C_loaders_for_store_history_rotate_images(root_path, batch_size, 
         train_iterators.append(train_iterator) 
         val_iterators.append(val_iterator)
         test_iterators.append(test_iterator)
-        client_types.append(client['type'])
+        
+        # Handle both 'type' (legacy numeric) and 'drift_type' (new string format)
+        # Convert string drift_type to numeric for backward compatibility
+        raw_type = client.get('type', client.get('drift_type', 0))
+        if isinstance(raw_type, str):
+            # Map string drift types to numeric codes for data_type field
+            type_map = {
+                'no_drift': 0,
+                'label_drift_only': 1,
+                'feature_drift_only': 2,
+                'real_drift_map1': 3,
+                'real_drift_map2': 3,
+                'real_drift_map3': 3,
+                'real_drift_map4': 3,
+            }
+            numeric_type = type_map.get(raw_type, 0)
+        else:
+            numeric_type = raw_type
+        
+        client_types.append(numeric_type)
         if 'features' in client:
             client_features.append(client['features'])
         else:
@@ -1393,7 +1462,8 @@ def get_client(
         tune_locally,
         data_type = 0,
         feature_type = None,
-        class_number = 10
+        class_number = 10,
+        prior_source = 'train'
 ):
     """
 
@@ -1421,7 +1491,8 @@ def get_client(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "mixture_SW":
         return MixtureClient_SW(
@@ -1434,7 +1505,8 @@ def get_client(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "fedrc":
         return FedRC(
@@ -1591,7 +1663,8 @@ def get_client(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
 
 def get_client_for_store_history(
@@ -1609,7 +1682,8 @@ def get_client_for_store_history(
         last_test_iterator,
         data_type = 0,
         feature_type = None,
-        class_number = 10
+        class_number = 10,
+        prior_source = 'train'
 ):
     """
 
@@ -1637,7 +1711,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "mixture_SW":
         return MixtureClient_SW(
@@ -1650,7 +1725,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "fedrc":
 
@@ -1665,7 +1741,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "fedrc_store_history":
 
@@ -1682,7 +1759,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "fedrc_tune":
         return FedRC(
@@ -1708,7 +1786,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "fedrc_SW":
         return FedRC_SW(
@@ -1721,7 +1800,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "ACGmixture":
         return ACGMixtureClient(
@@ -1747,7 +1827,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "IFCA":
         return IFCA(
@@ -1760,7 +1841,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "FeSEM":
         return FeSEM(
@@ -1773,7 +1855,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "AFL":
         return AgnosticFLClient(
@@ -1786,7 +1869,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "FFL":
         return FFLClient(
@@ -1800,7 +1884,8 @@ def get_client_for_store_history(
             q=q,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     elif client_type == "FedSoft":
         return FedSoft(
@@ -1813,7 +1898,8 @@ def get_client_for_store_history(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            prior_source=prior_source
         )
     else:
         return Client(
@@ -1846,7 +1932,10 @@ def get_client_for_store_history_version_2(
         feature_type = None,
         last_data_type = 0,
         last_feature_type =None,
-        class_number = 10
+        class_number = 10,
+        cl_strategy='naive_rehearsal',
+        er_buffer_size=500,
+        er_sample_mode='reservoir'
 ):
     """
     :param client_type: 
@@ -2063,7 +2152,10 @@ def get_client_for_store_history_version_2(
             tune_locally=tune_locally,
             data_type=data_type,
             feature_types=feature_type,
-            class_number = class_number
+            class_number = class_number,
+            cl_strategy=cl_strategy,
+            er_buffer_size=er_buffer_size,
+            er_sample_mode=er_sample_mode
         )
 
 

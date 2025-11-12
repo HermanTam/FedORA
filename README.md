@@ -53,6 +53,6 @@ python FedDAA_Fashion_MNIST.py fmnist-c fedrc_store_history --n_learners 2 --bz 
 
 ```
 
-
+python FedDAA_CIFAR10.py cifar10-c fedrc_store_history --data_dir cifar10-c-60_client-multiclass-drift --drift_detector metrics --diagnosis_mode multiclass --adaptive_method median_mad --adaptive_warmup 1 --adaptive_window 3 --adaptive_k 2.5 --respect_drift_types --n_learners 2 --bz 128 --lr 0.06 --lr_scheduler constant --log_freq 5 --optimizer sgd --seed 1 --verbose 1 --T 3 --n_rounds 40 --device 0 --sampling_rate 0.5 --suffix multiclass_drift_T_6-client_60-FedDAA-CIFAR-10
 
 
