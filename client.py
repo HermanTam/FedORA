@@ -674,7 +674,11 @@ class FedRC_Concept_Drift(Client):
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        labels_weights_T = self._val_labels_weights_T()
+        # Honor prior source selection: 'train' (original) vs 'val' (generalized)
+        if getattr(self, 'prior_source', 'train') == 'train':
+            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        else:
+            labels_weights_T = self._val_labels_weights_T()
         L = - all_losses.T - torch.log(labels_weights_T)
 
 
@@ -967,7 +971,11 @@ class FedRC_Concept_Drift_version2(Client):
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        labels_weights_T = self._val_labels_weights_T()
+        # Honor prior source selection: 'train' (original) vs 'val' (generalized)
+        if getattr(self, 'prior_source', 'train') == 'train':
+            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        else:
+            labels_weights_T = self._val_labels_weights_T()
         L = - all_losses.T - torch.log(labels_weights_T)
         
 
@@ -1410,7 +1418,11 @@ class FedRC_SW(FedRC):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        labels_weights_T = self._val_labels_weights_T()
+        # Honor prior source selection
+        if getattr(self, 'prior_source', 'train') == 'train':
+            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        else:
+            labels_weights_T = self._val_labels_weights_T()
         L = - all_losses.T - torch.log(labels_weights_T)
 
         self.mean_I = torch.exp(torch.log(self.sample_learner_weights.T) - all_losses.T).T
@@ -1457,7 +1469,11 @@ class FedRC_Adam(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        labels_weights_T = self._val_labels_weights_T()
+        # Honor prior source selection
+        if getattr(self, 'prior_source', 'train') == 'train':
+            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        else:
+            labels_weights_T = self._val_labels_weights_T()
         L = - all_losses.T - torch.log(labels_weights_T)
 
         new_samples_weights = F.softmax(torch.log(self.learners_ensemble.learners_weights) + L, dim=1).T
@@ -1496,7 +1512,11 @@ class FedRC_DP(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        labels_weights_T = self._val_labels_weights_T()
+        # Honor prior source selection
+        if getattr(self, 'prior_source', 'train') == 'train':
+            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        else:
+            labels_weights_T = self._val_labels_weights_T()
         L = - all_losses.T - torch.log(labels_weights_T)
 
         new_samples_weights = F.softmax(torch.log(self.learners_ensemble.learners_weights) + L, dim=1).T
