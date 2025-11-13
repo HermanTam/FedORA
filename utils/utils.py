@@ -1935,7 +1935,8 @@ def get_client_for_store_history_version_2(
         class_number = 10,
         cl_strategy='naive_rehearsal',
         er_buffer_size=500,
-        er_sample_mode='reservoir'
+        er_sample_mode='reservoir',
+        er_store_val=False
 ):
     """
     :param client_type: 
@@ -2008,7 +2009,11 @@ def get_client_for_store_history_version_2(
             feature_types=feature_type,
             last_data_type = last_data_type,
             last_feature_types = last_feature_type,
-            class_number = class_number
+            class_number = class_number,
+            cl_strategy=cl_strategy,
+            er_buffer_size=er_buffer_size,
+            er_sample_mode=er_sample_mode,
+            er_store_val=er_store_val
         )
     elif client_type == "fedrc_tune":
         return FedRC(

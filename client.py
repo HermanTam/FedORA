@@ -65,6 +65,7 @@ class Client(object):
             cl_strategy='naive_rehearsal',
             er_buffer_size=500,
             er_sample_mode='reservoir',
+            er_store_val=False,
             prior_source='train'
     ):
 
@@ -85,7 +86,8 @@ class Client(object):
         if cl_strategy == 'experience_replay':
             self.er_buffer = ExperienceReplayBuffer(
                 max_size=er_buffer_size,
-                sample_mode=er_sample_mode
+                sample_mode=er_sample_mode,
+                store_val=er_store_val
             )
             print(f"  Client initialized with ER buffer: {self.er_buffer}")
 
@@ -930,6 +932,10 @@ class FedRC_Concept_Drift_version2(Client):
             last_data_type=0,
             last_feature_types = None,
             class_number=10,
+            cl_strategy='naive_rehearsal',
+            er_buffer_size=500,
+            er_sample_mode='reservoir',
+            er_store_val=False,
             prior_source='train',
 
     ):
@@ -943,6 +949,10 @@ class FedRC_Concept_Drift_version2(Client):
             data_type=data_type,
             feature_types=feature_types,
             class_number=class_number,
+            cl_strategy=cl_strategy,
+            er_buffer_size=er_buffer_size,
+            er_sample_mode=er_sample_mode,
+            er_store_val=er_store_val,
             prior_source=prior_source)
         self.last_train_iterator = copy.deepcopy(last_train_iterator)
         self.last_val_iterator = copy.deepcopy(last_val_iterator)
@@ -1267,21 +1277,36 @@ class FedRC_Concept_Drift_version2(Client):
         """
         # Add current data to ER buffer (reservoir sampling)
         if self.er_buffer is not None:
+            # Pass both train and val if store_val enabled
+            val_dataset = self.current_val_iterator.dataset if self.er_buffer.store_val else None
             self.er_buffer.add_samples(
                 self.current_train_iterator.dataset,
+                val_dataset=val_dataset,
                 time_slot=time_slot
             )
         
         # Merge buffer with current data
         train_datasets = []
-        if self.er_buffer is not None and len(self.er_buffer) > 0:
-            buffered_dataset = self.er_buffer.get_all()
-            if buffered_dataset is not None:
-                train_datasets.append(buffered_dataset)
-        train_datasets.append(copy.deepcopy(self.current_train_iterator.dataset))
+        val_datasets = []
         
-        # For validation/test: only use current (not historical)
-        val_datasets = [copy.deepcopy(self.current_val_iterator.dataset)]
+        if self.er_buffer is not None and len(self.er_buffer) > 0:
+            if self.er_buffer.store_val:
+                # Get both train and val buffers
+                buffered_train, buffered_val = self.er_buffer.get_all()
+                if buffered_train is not None:
+                    train_datasets.append(buffered_train)
+                if buffered_val is not None:
+                    val_datasets.append(buffered_val)
+            else:
+                # Get only train buffer (original behavior)
+                buffered_dataset = self.er_buffer.get_all()
+                if buffered_dataset is not None:
+                    train_datasets.append(buffered_dataset)
+        
+        train_datasets.append(copy.deepcopy(self.current_train_iterator.dataset))
+        val_datasets.append(copy.deepcopy(self.current_val_iterator.dataset))
+        
+        # For test: only use current (not historical)
         test_datasets = [copy.deepcopy(self.current_test_iterator.dataset)]
         
         # Create merged datasets
@@ -1331,21 +1356,36 @@ class FedRC_Concept_Drift_version2(Client):
         """
         # Add current data to ER buffer
         if self.er_buffer is not None:
+            # Pass both train and val if store_val enabled
+            val_dataset = self.current_val_iterator.dataset if self.er_buffer.store_val else None
             self.er_buffer.add_samples(
                 self.current_train_iterator.dataset,
+                val_dataset=val_dataset,
                 time_slot=time_slot
             )
         
         # Merge buffer with current data
         train_datasets = []
-        if self.er_buffer is not None and len(self.er_buffer) > 0:
-            buffered_dataset = self.er_buffer.get_all()
-            if buffered_dataset is not None:
-                train_datasets.append(buffered_dataset)
-        train_datasets.append(copy.deepcopy(self.current_train_iterator.dataset))
+        val_datasets = []
         
-        # For validation/test: only use current
-        val_datasets = [copy.deepcopy(self.current_val_iterator.dataset)]
+        if self.er_buffer is not None and len(self.er_buffer) > 0:
+            if self.er_buffer.store_val:
+                # Get both train and val buffers
+                buffered_train, buffered_val = self.er_buffer.get_all()
+                if buffered_train is not None:
+                    train_datasets.append(buffered_train)
+                if buffered_val is not None:
+                    val_datasets.append(buffered_val)
+            else:
+                # Get only train buffer (original behavior)
+                buffered_dataset = self.er_buffer.get_all()
+                if buffered_dataset is not None:
+                    train_datasets.append(buffered_dataset)
+        
+        train_datasets.append(copy.deepcopy(self.current_train_iterator.dataset))
+        val_datasets.append(copy.deepcopy(self.current_val_iterator.dataset))
+        
+        # For test: only use current
         test_datasets = [copy.deepcopy(self.current_test_iterator.dataset)]
         
         # Create merged datasets with rotation

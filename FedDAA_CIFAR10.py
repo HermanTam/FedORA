@@ -1607,6 +1607,7 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
             cl_strategy = getattr(args_, 'cl_strategy', 'naive_rehearsal')
             er_buffer_size = getattr(args_, 'er_buffer_size', 500)
             er_sample_mode = getattr(args_, 'er_sample_mode', 'reservoir')
+            er_store_val = getattr(args_, 'er_store_val', False)
             
             client = get_client_for_store_history_version_2(
                 client_type=CLIENT_TYPE[args_.method],
@@ -1628,7 +1629,8 @@ def rot_120deg_init_60_client_store_history_simple2_iid_auto_clst_num_balance_co
                 class_number = class_number,
                 cl_strategy=cl_strategy,
                 er_buffer_size=er_buffer_size,
-                er_sample_mode=er_sample_mode
+                er_sample_mode=er_sample_mode,
+                er_store_val=er_store_val
             )
 
         clients_.append(client) 

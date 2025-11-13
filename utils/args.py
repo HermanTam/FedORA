@@ -113,6 +113,8 @@ def parse_args(args_list=None):
     parser.add_argument('--er_sample_mode', type=str, choices=['uniform', 'reservoir'], 
                         default='reservoir',
                         help='experience replay sampling: "uniform" (random from buffer) or "reservoir" (reservoir sampling)')
+    parser.add_argument('--er_store_val', action='store_true',
+                        help='store validation samples in ER buffer for fair comparison with naive rehearsal (doubles memory cost)')
     
     # Drift-type-aware rotation (multiclass datasets)
     parser.add_argument('--respect_drift_types', action='store_true',

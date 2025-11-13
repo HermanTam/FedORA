@@ -47,7 +47,7 @@ class ExperienceReplayBuffer:
         Empty the buffer
     """
     
-    def __init__(self, max_size=500, sample_mode='reservoir'):
+    def __init__(self, max_size=500, sample_mode='reservoir', store_val=False):
         """
         Initialize experience replay buffer.
         
@@ -58,18 +58,70 @@ class ExperienceReplayBuffer:
         sample_mode : str
             'reservoir' - Reservoir sampling (Algorithm R)
             'uniform' - Uniform random replacement
+        store_val : bool
+            Whether to also store validation samples (default: False)
+            Set to True for fair comparison with naive rehearsal
         """
         self.max_size = max_size
         self.sample_mode = sample_mode
-        self.buffer = []  # List of (data, label) tuples
-        self.n_seen = 0   # Total samples processed
+        self.store_val = store_val
+        self.buffer = []  # List of (data, label) tuples for training
+        self.val_buffer = [] if store_val else None  # Separate validation buffer
+        self.n_seen = 0   # Total training samples processed
+        self.n_seen_val = 0  # Total validation samples processed (if store_val)
         
         if sample_mode not in ['reservoir', 'uniform']:
             raise ValueError(f"Invalid sample_mode: {sample_mode}. Choose 'reservoir' or 'uniform'")
     
-    def add_samples(self, dataset, time_slot=None):
+    def _add_to_buffer(self, samples, buffer, n_seen):
         """
-        Add samples from new dataset using reservoir sampling.
+        Helper to add samples to a buffer using reservoir sampling.
+        
+        Parameters
+        ----------
+        samples : list
+            New samples to add
+        buffer : list
+            Target buffer (self.buffer or self.val_buffer)
+        n_seen : int
+            Current count of seen samples
+        
+        Returns
+        -------
+        int
+            Updated n_seen count
+        """
+        if self.sample_mode == 'reservoir':
+            # Reservoir sampling (Algorithm R)
+            for sample in samples:
+                n_seen += 1
+                
+                if len(buffer) < self.max_size:
+                    # Buffer not full - always add
+                    buffer.append(sample)
+                else:
+                    # Replace with probability k/n
+                    replace_prob = self.max_size / n_seen
+                    if random.random() < replace_prob:
+                        # Random replacement
+                        replace_idx = random.randint(0, self.max_size - 1)
+                        buffer[replace_idx] = sample
+        
+        elif self.sample_mode == 'uniform':
+            # Uniform random replacement (simpler baseline)
+            for sample in samples:
+                if len(buffer) < self.max_size:
+                    buffer.append(sample)
+                else:
+                    # Always replace random item
+                    replace_idx = random.randint(0, self.max_size - 1)
+                    buffer[replace_idx] = sample
+        
+        return n_seen
+    
+    def add_samples(self, train_dataset, val_dataset=None, time_slot=None):
+        """
+        Add samples from new dataset(s) using reservoir sampling.
         
         Reservoir Sampling (Algorithm R):
         For each new sample s with index i (global):
@@ -80,55 +132,51 @@ class ExperienceReplayBuffer:
         
         Parameters
         ----------
-        dataset : torch.utils.data.Dataset
-            New data to add (from current time slot)
+        train_dataset : torch.utils.data.Dataset
+            Training data to add (from current time slot)
+        val_dataset : torch.utils.data.Dataset, optional
+            Validation data to add (only if store_val=True)
         time_slot : int, optional
             Current time slot (for logging/debugging)
         """
-        # Extract samples from dataset
-        new_samples = []
-        for idx in range(len(dataset)):
-            data, label = dataset[idx]
-            new_samples.append((data, label))
+        # Extract training samples
+        train_samples = []
+        for idx in range(len(train_dataset)):
+            data, label = train_dataset[idx]
+            train_samples.append((data, label))
         
-        if self.sample_mode == 'reservoir':
-            # Reservoir sampling (Algorithm R)
-            for sample in new_samples:
-                self.n_seen += 1
-                
-                if len(self.buffer) < self.max_size:
-                    # Buffer not full - always add
-                    self.buffer.append(sample)
-                else:
-                    # Replace with probability k/n
-                    replace_prob = self.max_size / self.n_seen
-                    if random.random() < replace_prob:
-                        # Random replacement
-                        replace_idx = random.randint(0, self.max_size - 1)
-                        self.buffer[replace_idx] = sample
+        # Add to training buffer
+        self.n_seen = self._add_to_buffer(train_samples, self.buffer, self.n_seen)
         
-        elif self.sample_mode == 'uniform':
-            # Uniform random replacement (simpler baseline)
-            for sample in new_samples:
-                if len(self.buffer) < self.max_size:
-                    self.buffer.append(sample)
-                else:
-                    # Always replace random item
-                    replace_idx = random.randint(0, self.max_size - 1)
-                    self.buffer[replace_idx] = sample
+        # Add to validation buffer if enabled
+        if self.store_val and val_dataset is not None:
+            val_samples = []
+            for idx in range(len(val_dataset)):
+                data, label = val_dataset[idx]
+                val_samples.append((data, label))
+            
+            self.n_seen_val = self._add_to_buffer(val_samples, self.val_buffer, self.n_seen_val)
     
     def get_all(self):
         """
-        Return all buffered samples as a PyTorch dataset.
+        Return all buffered samples as PyTorch dataset(s).
         
         Returns
         -------
-        BufferedDataset
-            Custom dataset containing all buffer samples
+        BufferedDataset or tuple
+            If store_val=False: returns training BufferedDataset (or None)
+            If store_val=True: returns (train_dataset, val_dataset) tuple
         """
-        if len(self.buffer) == 0:
-            return None
-        return BufferedDataset(self.buffer)
+        if not self.store_val:
+            # Original behavior: return only training buffer
+            if len(self.buffer) == 0:
+                return None
+            return BufferedDataset(self.buffer)
+        else:
+            # New behavior: return both buffers
+            train_data = BufferedDataset(self.buffer) if len(self.buffer) > 0 else None
+            val_data = BufferedDataset(self.val_buffer) if len(self.val_buffer) > 0 else None
+            return train_data, val_data
     
     def get_sample(self, n):
         """
@@ -154,6 +202,9 @@ class ExperienceReplayBuffer:
         """Reset buffer (for ablation studies)."""
         self.buffer = []
         self.n_seen = 0
+        if self.store_val:
+            self.val_buffer = []
+            self.n_seen_val = 0
     
     def size(self):
         """Return current buffer size."""
@@ -165,10 +216,13 @@ class ExperienceReplayBuffer:
     
     def __repr__(self):
         """String representation for debugging."""
-        return (f"ExperienceReplayBuffer(max_size={self.max_size}, "
+        base = (f"ExperienceReplayBuffer(max_size={self.max_size}, "
                 f"current_size={len(self.buffer)}, "
                 f"n_seen={self.n_seen}, "
-                f"mode={self.sample_mode})")
+                f"mode={self.sample_mode}")
+        if self.store_val:
+            base += f", val_size={len(self.val_buffer)}, n_seen_val={self.n_seen_val}"
+        return base + ")"
 
 
 class BufferedDataset(Dataset):
