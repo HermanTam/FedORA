@@ -1,4 +1,3 @@
-
 from collections import Counter, defaultdict
 import copy
 import gc
@@ -2334,6 +2333,11 @@ def run_experiment(args_, exp_logger=None):
     time_objective_aware_means = []
     time_objective_aware_old_means = []
     time_objective_aware_global_means = []
+    time_p_local_means = []
+    time_g_local_means = []
+    time_g_old_means = []
+    time_p_global_means = []
+    time_g_global_means = []
     event_records = []
     logs_base_path = Path(logs_dir)
     logs_base_path.mkdir(parents=True, exist_ok=True)
@@ -2811,65 +2815,119 @@ def run_experiment(args_, exp_logger=None):
         
         # Per time-slot objective-aware/global/local means (across clients)
         try:
-            # Local current test accuracy per client
+            # Local current test accuracy per client (and per-objective breakdown)
             local_accs = []
-            for c in clients:
+            p_local_accs = []
+            g_local_accs = []
+            local_acc_by_idx = {}
+            for idx, c in enumerate(clients):
                 acc = evaluate_iterator_accuracy(c.learners_ensemble, c.test_iterator)
                 if acc is not None:
                     local_accs.append(acc)
-            if len(local_accs) > 0:
+                    local_acc_by_idx[idx] = acc
+                    if getattr(c, 'objective', 'G') == 'P':
+                        p_local_accs.append(acc)
+                    else:
+                        g_local_accs.append(acc)
+            if local_accs:
                 time_local_all_means.append(float(np.mean(local_accs)))
+            if p_local_accs:
+                time_p_local_means.append(float(np.mean(p_local_accs)))
+            if g_local_accs:
+                time_g_local_means.append(float(np.mean(g_local_accs)))
 
-            # Global test accuracy per client (if enabled)
+            # Old-test accuracy for G-clients (baseline retention)
+            g_old_accs = []
+            old_acc_by_idx = {}
+            for idx, c in enumerate(clients):
+                if getattr(c, 'objective', 'G') == 'G':
+                    old_acc = evaluate_iterator_accuracy(c.learners_ensemble, getattr(c, 'last_test_iterator', None))
+                    if old_acc is not None:
+                        g_old_accs.append(old_acc)
+                        old_acc_by_idx[idx] = old_acc
+            if g_old_accs:
+                time_g_old_means.append(float(np.mean(g_old_accs)))
+
+            # Global test accuracy (if enabled)
+            global_accs = []
+            global_acc_by_idx = {}
+            p_global_accs = []
+            g_global_accs = []
             if 'global_test_iterator' in locals() and global_test_iterator is not None:
-                global_accs = []
-                for c in clients:
-                    acc = evaluate_iterator_accuracy(c.learners_ensemble, global_test_iterator)
-                    if acc is not None:
-                        global_accs.append(acc)
-                if len(global_accs) > 0:
+                for idx, c in enumerate(clients):
+                    acc_global = evaluate_iterator_accuracy(c.learners_ensemble, global_test_iterator)
+                    if acc_global is None:
+                        continue
+                    global_acc_by_idx[idx] = acc_global
+                    global_accs.append(acc_global)
+                    if getattr(c, 'objective', 'G') == 'P':
+                        p_global_accs.append(acc_global)
+                    else:
+                        g_global_accs.append(acc_global)
+                if global_accs:
                     time_global_all_means.append(float(np.mean(global_accs)))
+                if p_global_accs:
+                    time_p_global_means.append(float(np.mean(p_global_accs)))
+                if g_global_accs:
+                    time_g_global_means.append(float(np.mean(g_global_accs)))
+            else:
+                global_accs = []
 
             # Objective-aware (P: local current; G: global if available else old)
             oa_accs = []
-            for c in clients:
+            for idx, c in enumerate(clients):
                 obj = getattr(c, 'objective', 'G')
                 if obj == 'P':
-                    acc = evaluate_iterator_accuracy(c.learners_ensemble, c.test_iterator)
+                    acc = local_acc_by_idx.get(idx)
                 else:
-                    if 'global_test_iterator' in locals() and global_test_iterator is not None:
-                        acc = evaluate_iterator_accuracy(c.learners_ensemble, global_test_iterator)
+                    if global_acc_by_idx:
+                        acc = global_acc_by_idx.get(idx)
                     else:
-                        acc = evaluate_iterator_accuracy(c.learners_ensemble, getattr(c, 'last_test_iterator', None))
+                        acc = old_acc_by_idx.get(idx)
                 if acc is not None:
                     oa_accs.append(acc)
-            if len(oa_accs) > 0:
+            if oa_accs:
                 time_objective_aware_means.append(float(np.mean(oa_accs)))
 
             # Objective-aware OLD (P: local; G: old)
             oa_old_accs = []
-            for c in clients:
+            for idx, c in enumerate(clients):
                 if getattr(c, 'objective', 'G') == 'P':
-                    acc = evaluate_iterator_accuracy(c.learners_ensemble, c.test_iterator)
+                    acc = local_acc_by_idx.get(idx)
                 else:
-                    acc = evaluate_iterator_accuracy(c.learners_ensemble, getattr(c, 'last_test_iterator', None))
+                    acc = old_acc_by_idx.get(idx)
                 if acc is not None:
                     oa_old_accs.append(acc)
-            if len(oa_old_accs) > 0:
+            if oa_old_accs:
                 time_objective_aware_old_means.append(float(np.mean(oa_old_accs)))
 
             # Objective-aware GLOBAL (P: local; G: global)
-            if 'global_test_iterator' in locals() and global_test_iterator is not None:
-                oa_global_accs = []
-                for c in clients:
+            oa_global_accs = []
+            if global_acc_by_idx:
+                for idx, c in enumerate(clients):
                     if getattr(c, 'objective', 'G') == 'P':
-                        acc = evaluate_iterator_accuracy(c.learners_ensemble, c.test_iterator)
+                        acc = local_acc_by_idx.get(idx)
                     else:
-                        acc = evaluate_iterator_accuracy(c.learners_ensemble, global_test_iterator)
+                        acc = global_acc_by_idx.get(idx)
                     if acc is not None:
                         oa_global_accs.append(acc)
-                if len(oa_global_accs) > 0:
+                if oa_global_accs:
                     time_objective_aware_global_means.append(float(np.mean(oa_global_accs)))
+
+            # P-clients across time: current local accuracy only (already covered but retained for clarity)
+            # (time_p_local_means updated above)
+
+            # G-clients across time: old local accuracy only
+            # (time_g_local_means updated above)
+
+            # G-clients across time: old global accuracy only
+            # (time_g_old_means updated above)
+
+            # P-clients across time: old global accuracy only
+            # (time_p_global_means updated above)
+
+            # G-clients across time: global accuracy only
+            # (time_g_global_means updated above)
 
             # Write compact per-slot summary for paper-friendly logging
             try:
@@ -3094,6 +3152,11 @@ def run_experiment(args_, exp_logger=None):
         "objective_aware": sample_stats(time_objective_aware_means),
         "objective_aware_old": sample_stats(time_objective_aware_old_means),
         "objective_aware_global": sample_stats(time_objective_aware_global_means),
+        "P_local": sample_stats(time_p_local_means),
+        "G_local": sample_stats(time_g_local_means),
+        "G_old": sample_stats(time_g_old_means),
+        "P_global": sample_stats(time_p_global_means),
+        "G_global": sample_stats(time_g_global_means),
     }
 
     # All past concepts @ final (per-client mean over test history)
@@ -3366,6 +3429,46 @@ def run_experiment(args_, exp_logger=None):
             f.write(f"  Min:  {at_oa_global.get('min', float('nan')):.4f}\n")
             f.write(f"  Median: {at_oa_global.get('median', float('nan')):.4f}\n")
             f.write(f"  Max:  {at_oa_global.get('max', float('nan')):.4f}\n\n")
+
+            at_p_local = metrics_output["stats"]["across_time"].get("P_local", {})
+            f.write("P clients across-time (local current):\n")
+            f.write(f"  Mean: {at_p_local.get('mean', float('nan')):.4f}\n")
+            f.write(f"  Std:  {at_p_local.get('std', float('nan')):.4f}\n")
+            f.write(f"  Min:  {at_p_local.get('min', float('nan')):.4f}\n")
+            f.write(f"  Median: {at_p_local.get('median', float('nan')):.4f}\n")
+            f.write(f"  Max:  {at_p_local.get('max', float('nan')):.4f}\n\n")
+
+            at_g_local = metrics_output["stats"]["across_time"].get("G_local", {})
+            f.write("G clients across-time (local current):\n")
+            f.write(f"  Mean: {at_g_local.get('mean', float('nan')):.4f}\n")
+            f.write(f"  Std:  {at_g_local.get('std', float('nan')):.4f}\n")
+            f.write(f"  Min:  {at_g_local.get('min', float('nan')):.4f}\n")
+            f.write(f"  Median: {at_g_local.get('median', float('nan')):.4f}\n")
+            f.write(f"  Max:  {at_g_local.get('max', float('nan')):.4f}\n\n")
+
+            at_g_old = metrics_output["stats"]["across_time"].get("G_old", {})
+            f.write("G clients across-time (old baseline):\n")
+            f.write(f"  Mean: {at_g_old.get('mean', float('nan')):.4f}\n")
+            f.write(f"  Std:  {at_g_old.get('std', float('nan')):.4f}\n")
+            f.write(f"  Min:  {at_g_old.get('min', float('nan')):.4f}\n")
+            f.write(f"  Median: {at_g_old.get('median', float('nan')):.4f}\n")
+            f.write(f"  Max:  {at_g_old.get('max', float('nan')):.4f}\n\n")
+
+            at_p_global = metrics_output["stats"]["across_time"].get("P_global", {})
+            f.write("P clients across-time (global baseline):\n")
+            f.write(f"  Mean: {at_p_global.get('mean', float('nan')):.4f}\n")
+            f.write(f"  Std:  {at_p_global.get('std', float('nan')):.4f}\n")
+            f.write(f"  Min:  {at_p_global.get('min', float('nan')):.4f}\n")
+            f.write(f"  Median: {at_p_global.get('median', float('nan')):.4f}\n")
+            f.write(f"  Max:  {at_p_global.get('max', float('nan')):.4f}\n\n")
+
+            at_g_global = metrics_output["stats"]["across_time"].get("G_global", {})
+            f.write("G clients across-time (global baseline):\n")
+            f.write(f"  Mean: {at_g_global.get('mean', float('nan')):.4f}\n")
+            f.write(f"  Std:  {at_g_global.get('std', float('nan')):.4f}\n")
+            f.write(f"  Min:  {at_g_global.get('min', float('nan')):.4f}\n")
+            f.write(f"  Median: {at_g_global.get('median', float('nan')):.4f}\n")
+            f.write(f"  Max:  {at_g_global.get('max', float('nan')):.4f}\n\n")
 
             # Tasks@final (Rotation)
             try:
