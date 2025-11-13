@@ -17,3 +17,5 @@ logs/
 *.pkl
 *.pt
 *.tfevents.*
+__pycache__/
+*.pyc
