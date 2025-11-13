@@ -564,26 +564,20 @@ class FedRC(Client):
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
 
-        # Select prior source for responsibility computation
-        if getattr(self, 'prior_source', 'train') == 'train':
-            # Original FedDAA behavior: use train-aligned per-sample priors
-            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+        # ✅ CORRECT FIX: labels_weights is for training set, but we use validation losses
+        # When sizes don't match (e.g., experience replay), use validation-aligned priors
+        n_val = all_losses.shape[0]
+        n_train = self.labels_weights.shape[1]
+        
+        if n_val != n_train:
+            # Size mismatch: use validation-aligned priors derived from per-class weights
+            labels_weights_T = self._val_labels_weights_T()
         else:
-            # Generalized behavior: build validation-aligned priors by projecting class-wise weights
-            n_val = len(self.val_iterator.dataset)
-            if self.labels_weights.shape[1] != n_val:
-                lw_val = torch.zeros(self.n_learners, n_val)
-                try:
-                    val_labels = self.val_iterator.dataset.targets
-                    if hasattr(val_labels, 'tolist'):
-                        val_labels = val_labels.tolist()
-                    for i, y in enumerate(val_labels):
-                        lw_val[:, i] = self.labels_learner_weights[:, int(y)]
-                except Exception:
-                    lw_val[:] = 1.0 / self.n_learners
-                labels_weights_T = lw_val.T.clamp(min=1e-8)
-            else:
+            # Sizes match: can use labels_weights directly
+            if getattr(self, 'prior_source', 'train') == 'train':
                 labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self._val_labels_weights_T()
 
         L = - all_losses.T - torch.log(labels_weights_T)
 
@@ -672,13 +666,24 @@ class FedRC_Concept_Drift(Client):
                     
     
     def update_sample_weights(self):
+        # ✅ CORRECT FIX: Always use validation losses (original algorithm behavior)
+        # Handle size mismatches automatically via validation-aligned priors
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        # Honor prior source selection: 'train' (original) vs 'val' (generalized)
-        if getattr(self, 'prior_source', 'train') == 'train':
-            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
-        else:
+        n_val = all_losses.shape[0]
+        n_train = self.labels_weights.shape[1]
+        
+        if n_val != n_train:
+            # Size mismatch: use validation-aligned priors derived from per-class weights
+            # This preserves original algorithm (val losses) while handling mismatch
             labels_weights_T = self._val_labels_weights_T()
+        else:
+            # Sizes match: respect prior_source flag (original behavior when sizes match)
+            if getattr(self, 'prior_source', 'train') == 'train':
+                labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self._val_labels_weights_T()
+        
         L = - all_losses.T - torch.log(labels_weights_T)
 
 
@@ -971,11 +976,21 @@ class FedRC_Concept_Drift_version2(Client):
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
         
-        # Honor prior source selection: 'train' (original) vs 'val' (generalized)
-        if getattr(self, 'prior_source', 'train') == 'train':
-            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
-        else:
+        # ✅ CORRECT FIX: labels_weights is for training set, but we use validation losses
+        # When sizes don't match (e.g., experience replay), use validation-aligned priors
+        n_val = all_losses.shape[0]
+        n_train = self.labels_weights.shape[1]
+        
+        if n_val != n_train:
+            # Size mismatch: use validation-aligned priors derived from per-class weights
             labels_weights_T = self._val_labels_weights_T()
+        else:
+            # Sizes match: can use labels_weights directly
+            if getattr(self, 'prior_source', 'train') == 'train':
+                labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self._val_labels_weights_T()
+        
         L = - all_losses.T - torch.log(labels_weights_T)
         
 
@@ -1418,11 +1433,22 @@ class FedRC_SW(FedRC):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        # Honor prior source selection
-        if getattr(self, 'prior_source', 'train') == 'train':
-            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
-        else:
+        
+        # ✅ CORRECT FIX: labels_weights is for training set, but we use validation losses
+        # When sizes don't match (e.g., experience replay), use validation-aligned priors
+        n_val = all_losses.shape[0]
+        n_train = self.labels_weights.shape[1]
+        
+        if n_val != n_train:
+            # Size mismatch: use validation-aligned priors derived from per-class weights
             labels_weights_T = self._val_labels_weights_T()
+        else:
+            # Sizes match: can use labels_weights directly
+            if getattr(self, 'prior_source', 'train') == 'train':
+                labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self._val_labels_weights_T()
+        
         L = - all_losses.T - torch.log(labels_weights_T)
 
         self.mean_I = torch.exp(torch.log(self.sample_learner_weights.T) - all_losses.T).T
@@ -1469,11 +1495,22 @@ class FedRC_Adam(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        # Honor prior source selection
-        if getattr(self, 'prior_source', 'train') == 'train':
-            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
-        else:
+        
+        # ✅ CORRECT FIX: labels_weights is for training set, but we use validation losses
+        # When sizes don't match (e.g., experience replay), use validation-aligned priors
+        n_val = all_losses.shape[0]
+        n_train = self.labels_weights.shape[1]
+        
+        if n_val != n_train:
+            # Size mismatch: use validation-aligned priors derived from per-class weights
             labels_weights_T = self._val_labels_weights_T()
+        else:
+            # Sizes match: can use labels_weights directly
+            if getattr(self, 'prior_source', 'train') == 'train':
+                labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self._val_labels_weights_T()
+        
         L = - all_losses.T - torch.log(labels_weights_T)
 
         new_samples_weights = F.softmax(torch.log(self.learners_ensemble.learners_weights) + L, dim=1).T
@@ -1512,11 +1549,22 @@ class FedRC_DP(Client):
 
     def update_sample_weights(self):
         all_losses = self.learners_ensemble.gather_losses(self.val_iterator)
-        # Honor prior source selection
-        if getattr(self, 'prior_source', 'train') == 'train':
-            labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
-        else:
+        
+        # ✅ CORRECT FIX: labels_weights is for training set, but we use validation losses
+        # When sizes don't match (e.g., experience replay), use validation-aligned priors
+        n_val = all_losses.shape[0]
+        n_train = self.labels_weights.shape[1]
+        
+        if n_val != n_train:
+            # Size mismatch: use validation-aligned priors derived from per-class weights
             labels_weights_T = self._val_labels_weights_T()
+        else:
+            # Sizes match: can use labels_weights directly
+            if getattr(self, 'prior_source', 'train') == 'train':
+                labels_weights_T = self.labels_weights.T.clamp(min=1e-8)
+            else:
+                labels_weights_T = self._val_labels_weights_T()
+        
         L = - all_losses.T - torch.log(labels_weights_T)
 
         new_samples_weights = F.softmax(torch.log(self.learners_ensemble.learners_weights) + L, dim=1).T
