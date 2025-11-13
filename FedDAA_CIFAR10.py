@@ -2105,9 +2105,11 @@ def run_experiment(args_, exp_logger=None):
             method=args_.adaptive_method,
             window_size=getattr(args_, 'adaptive_window', 5),
             k=getattr(args_, 'adaptive_k', 2.0),
+            alpha=getattr(args_, 'adaptive_alpha', 0.2),
             warm_up=getattr(args_, 'adaptive_warmup', 2)
         )
-        print(f"==> Adaptive thresholds enabled: method={args_.adaptive_method}, k={args_.adaptive_k}")
+        alpha_str = f", alpha={args_.adaptive_alpha}" if args_.adaptive_method == 'ewma' else ""
+        print(f"==> Adaptive thresholds enabled: method={args_.adaptive_method}, k={args_.adaptive_k}{alpha_str}")
     
     # Initialize ground truth tracking for confusion matrix
     ground_truth_drift_types = {}
@@ -2235,6 +2237,35 @@ def run_experiment(args_, exp_logger=None):
             for client, obj in zip(test_clients, test_objectives):
                 client.objective = obj
             print(f"==> Random objective assignment (seed={args_.seed}): {Counter(objectives)}")
+        elif objective_assignment.startswith("random_ratio:"):
+            ratio_spec = objective_assignment[len("random_ratio:"):].strip()
+            ratio_map = {'G': 0.0, 'P': 0.0}
+            if not ratio_spec:
+                raise ValueError("random_ratio must include ratios, e.g. random_ratio:G:70,P:30")
+            for part in ratio_spec.split(','):
+                entry = part.strip()
+                if not entry:
+                    continue
+                if ':' not in entry:
+                    raise ValueError(f"Invalid ratio entry '{entry}'. Expected format key:value")
+                key, value = entry.split(':', 1)
+                key = key.strip().upper()
+                if key not in ('G', 'P'):
+                    raise ValueError(f"Unsupported objective '{key}'. Only 'G' and 'P' are allowed.")
+                try:
+                    ratio_map[key] += float(value.strip())
+                except ValueError as exc:
+                    raise ValueError(f"Invalid ratio value in '{entry}'") from exc
+            if ratio_map['G'] <= 0 and ratio_map['P'] <= 0:
+                raise ValueError("random_ratio requires at least one positive ratio for G or P")
+            rng = np.random.RandomState(args_.seed)
+            objectives = _generate_ratio_assignment(ratio_map, len(clients), rng)
+            for client, obj in zip(clients, objectives):
+                client.objective = obj
+            test_objectives = _generate_ratio_assignment(ratio_map, len(test_clients), rng)
+            for client, obj in zip(test_clients, test_objectives):
+                client.objective = obj
+            print(f"==> Random ratio objective assignment: {Counter(objectives)} (spec={ratio_spec})")
         elif not objective_assignment.startswith("drift_based:"):
             assign_objectives(clients, objective_assignment)
             assign_objectives(test_clients, objective_assignment)
@@ -3560,3 +3591,40 @@ if __name__ == "__main__":
         print(f"G-Score mean±std: {aggregate['g_scores']['mean']:.4f} ± {aggregate['g_scores']['std']:.4f}")
     if 'forgetting' in aggregate:
         print(f"Forgetting ratio mean±std: {aggregate['forgetting']['mean']:.4f} ± {aggregate['forgetting']['std']:.4f}")
+
+    def _generate_ratio_assignment(ratio_map, count, rng):
+        if count <= 0:
+            return []
+        keys = [k for k in ratio_map if ratio_map[k] > 0]
+        if not keys:
+            keys = list(ratio_map.keys())
+        if not keys:
+            keys = ['G', 'P']
+        weights = np.array([float(ratio_map.get(k, 0.0)) for k in keys], dtype=float)
+        if np.all(weights <= 0):
+            weights = np.ones(len(keys), dtype=float)
+        total = weights.sum()
+        weights = weights / total
+        exact_counts = weights * count
+        base_counts = np.floor(exact_counts).astype(int)
+        assigned = int(base_counts.sum())
+        remainder = exact_counts - base_counts
+        remaining = count - assigned
+        if remaining > 0:
+            order = np.argsort(-remainder)
+            for idx in order[:remaining]:
+                base_counts[idx] += 1
+        elif remaining < 0:
+            order = np.argsort(remainder)
+            for idx in order[: -remaining]:
+                if base_counts[idx] > 0:
+                    base_counts[idx] -= 1
+        objectives = []
+        for k, c in zip(keys, base_counts):
+            objectives.extend([k] * int(c))
+        while len(objectives) < count:
+            objectives.append(keys[0])
+        if len(objectives) > count:
+            objectives = objectives[:count]
+        rng.shuffle(objectives)
+        return objectives

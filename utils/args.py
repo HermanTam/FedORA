@@ -55,21 +55,11 @@ def parse_args(args_list=None):
     parser.add_argument('--diagnosis_mode', type=str, choices=['binary', 'multiclass'], default='binary', help='drift diagnosis granularity')
     parser.add_argument('--objective_aware', action='store_true', help='enable objective-aware routing (uses client.objective if set)')
     parser.add_argument('--objective_assignment', type=str, default=None,
-                        help='OPTIONAL: assign objectives: first_half:G,second_half:P | all:G | all:P | random_50_50')
+                        help='OPTIONAL: assign objectives: first_half:G,second_half:P | all:G | all:P | random_50_50 | random_ratio:G:70,P:30')
 
     # Responsibility prior source: original (train-aligned) vs validation-aligned (generalized)
     parser.add_argument('--prior_source', choices=['train', 'val'], default='train',
                         help='Use train-aligned (original) or validation-aligned label priors in responsibility L')
-
-    # Adaptive thresholds
-    parser.add_argument('--adaptive_thresholds', action='store_true', help='use adaptive drift thresholds (μ+τσ)')
-    parser.add_argument('--threshold_tau', type=float, default=3.0, help='tau (τ) for adaptive thresholds')
-    parser.add_argument('--threshold_window', type=int, default=10, help='rolling window size when mode=window')
-    parser.add_argument('--threshold_mode', type=str, choices=['window', 'ewma'], default='window',
-                        help='adaptive baseline mode: window (rolling mean/std) or ewma (exponential moving average)')
-    parser.add_argument('--threshold_alpha', type=float, default=0.2,
-                        help='EWMA smoothing factor α in (0,1]; higher reacts faster (mode=ewma)')
-    parser.add_argument('--use_statistical_tests', action='store_true', help='use chi-square & KS tests instead of mu+tau*sigma')
 
     # Differential Privacy
     parser.add_argument('--use_dp', action='store_true', help='enable differential privacy for prototypes')
@@ -88,13 +78,15 @@ def parse_args(args_list=None):
     parser.add_argument('--drift_detector', type=str, choices=['prototype', 'metrics'], default='prototype',
                         help='drift detection method: "prototype" (original cluster-based) or "metrics" (permutation-based multiclass)')
     parser.add_argument('--adaptive_method', type=str, choices=['none', 'ewma', 'median_mad'], default='none',
-                        help='adaptive threshold method for metrics detector')
+                        help='adaptive threshold method for metrics detector: "ewma" (exponential moving average), "median_mad" (robust median+MAD), or "none" (fixed thresholds)')
     parser.add_argument('--adaptive_k', type=float, default=2.0,
-                        help='multiplier for adaptive thresholds (k * std or k * MAD)')
+                        help='multiplier for adaptive thresholds (k * std or k * MAD). Similar to tau (τ) in μ+τσ rule')
     parser.add_argument('--adaptive_window', type=int, default=5,
-                        help='window size for adaptive threshold history')
+                        help='window size for adaptive threshold history (rolling window for mean/std computation)')
+    parser.add_argument('--adaptive_alpha', type=float, default=0.2,
+                        help='EWMA smoothing factor α in (0,1] for adaptive_method=ewma; higher values react faster to changes')
     parser.add_argument('--adaptive_warmup', type=int, default=2,
-                        help='number of slots before adaptive thresholds activate')
+                        help='number of slots before adaptive thresholds activate (uses fixed thresholds during warmup)')
     
     # Fixed thresholds for metrics detector
     parser.add_argument('--tau_label', type=float, default=0.3,

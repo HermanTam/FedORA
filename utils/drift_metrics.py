@@ -187,28 +187,35 @@ class AdaptiveThresholdManager:
     Manage adaptive thresholds for drift detection using rolling statistics.
     
     Supports multiple adaptation strategies:
-    - 'ewma': Exponentially weighted moving average
+    - 'ewma': Exponentially weighted moving average (with alpha smoothing)
     - 'median_mad': Robust median + MAD (Median Absolute Deviation)
     - 'quantile': Per-slot quantile-based outlier detection
     """
     
-    def __init__(self, method='ewma', window_size=5, k=2.0, warm_up=2):
+    def __init__(self, method='ewma', window_size=5, k=2.0, alpha=0.2, warm_up=2):
         """
         Args:
             method: 'ewma', 'median_mad', or 'quantile'
-            window_size: Number of slots to keep in history
+            window_size: Number of slots to keep in history (for rolling window mode)
             k: Multiplier for threshold (k * std or k * MAD)
+            alpha: EWMA smoothing factor in (0,1]; higher values react faster (only used when method='ewma')
             warm_up: Number of slots before thresholds become active
         """
         self.method = method
         self.window_size = window_size
         self.k = k
+        self.alpha = max(1e-6, min(1.0, float(alpha)))  # Bound alpha to (0,1]
         self.warm_up = warm_up
         
-        # Per-client metric histories
+        # Per-client metric histories (for rolling window)
         self.label_history = {}  # client_id -> deque of values
         self.feat_history = {}
         self.perm_history = {}
+        
+        # Per-client EWMA state (for true EWMA mode)
+        self.label_ewma = {}  # client_id -> {'mx': float, 'mx2': float}
+        self.feat_ewma = {}
+        self.perm_ewma = {}
         
         self.slot_count = 0
     
@@ -252,7 +259,62 @@ class AdaptiveThresholdManager:
             return default_tau_label, default_tau_feat, default_tau_perm
     
     def _ewma_thresholds(self, client_id, default_label, default_feat, default_perm):
-        """EWMA-based thresholds: mean + k * std"""
+        """
+        EWMA-based thresholds using exponential moving average.
+        
+        Uses true EWMA with alpha smoothing for mean and variance estimation.
+        Threshold = EWMA_mean + k * sqrt(EWMA_variance)
+        """
+        # Initialize EWMA state if needed
+        if client_id not in self.label_ewma:
+            # Will be initialized on first update
+            self.label_ewma[client_id] = {'mx': None, 'mx2': None}
+            self.feat_ewma[client_id] = {'mx': None, 'mx2': None}
+            self.perm_ewma[client_id] = {'mx': None, 'mx2': None}
+        
+        # Get current values from history (most recent)
+        if client_id in self.label_history and len(self.label_history[client_id]) > 0:
+            label_val = self.label_history[client_id][-1]
+            feat_val = self.feat_history[client_id][-1]
+            perm_val = self.perm_history[client_id][-1]
+        else:
+            # Fallback to rolling window if no history yet
+            return self._rolling_window_thresholds(client_id, default_label, default_feat, default_perm)
+        
+        # Update EWMA for each metric
+        def update_ewma(ewma_state, value):
+            if ewma_state['mx'] is None:
+                # Initialize on first observation
+                ewma_state['mx'] = float(value)
+                ewma_state['mx2'] = float(value * value)
+            else:
+                # Update EWMA: E[x] and E[x^2]
+                a = self.alpha
+                ewma_state['mx'] = (1.0 - a) * ewma_state['mx'] + a * float(value)
+                ewma_state['mx2'] = (1.0 - a) * ewma_state['mx2'] + a * float(value * value)
+            
+            # Compute mean and variance from EWMA moments
+            mu = ewma_state['mx']
+            var = max(ewma_state['mx2'] - mu * mu, 1e-12)
+            std = np.sqrt(var)
+            return mu, std
+        
+        # Compute thresholds using EWMA
+        mu_label, std_label = update_ewma(self.label_ewma[client_id], label_val)
+        mu_feat, std_feat = update_ewma(self.feat_ewma[client_id], feat_val)
+        mu_perm, std_perm = update_ewma(self.perm_ewma[client_id], perm_val)
+        
+        tau_label = max(mu_label + self.k * std_label, default_label)
+        tau_feat = max(mu_feat + self.k * std_feat, default_feat)
+        tau_perm = max(mu_perm + self.k * std_perm, default_perm)
+        
+        return tau_label, tau_feat, tau_perm
+    
+    def _rolling_window_thresholds(self, client_id, default_label, default_feat, default_perm):
+        """Fallback: rolling window mean + k * std (used when EWMA not initialized)"""
+        if client_id not in self.label_history or len(self.label_history[client_id]) == 0:
+            return default_label, default_feat, default_perm
+        
         label_vals = np.array(self.label_history[client_id])
         feat_vals = np.array(self.feat_history[client_id])
         perm_vals = np.array(self.perm_history[client_id])
