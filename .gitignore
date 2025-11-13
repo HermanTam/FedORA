@@ -5,7 +5,8 @@ __pycache__/
 
 # Ignore the large dataset
 data/
-
+logs/
+*.pt
 # Ignore large binary experiment files
 *.pkl
 *.tfevents
