@@ -1,0 +1,30 @@
+time_slot=0
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.9926
+global_all_mean=0.2420
+oa_old_mean=0.6144
+oa_global_mean=0.6180
+P_on_current_mean=0.9927
+G_on_old_mean=0.2361
+--------------------------------------------------------------------------------
+time_slot=1
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.4429
+global_all_mean=0.1501
+oa_old_mean=0.3361
+oa_global_mean=0.2904
+P_on_current_mean=0.4306
+G_on_old_mean=0.2417
+--------------------------------------------------------------------------------
+time_slot=2
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.2500
+global_all_mean=0.1400
+oa_old_mean=0.2117
+oa_global_mean=0.2004
+P_on_current_mean=0.2607
+G_on_old_mean=0.1627
+--------------------------------------------------------------------------------
