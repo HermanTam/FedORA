@@ -2694,11 +2694,18 @@ def run_experiment(args_, exp_logger=None):
                         elif getattr(args_, 'abl_all_merge', False):
                             client.set_concept_shift_flag(0)
 
-            # Apply merge/no-merge policy to training iterators based on flags
-            try:
-                update_clients_train_iterator_and_other_attribute(clients)
-            except Exception:
-                pass
+            real_shift_set, real_clean_set = get_real_shift_clients_set(clients)
+            # print("real_shift_set:",real_shift_set)
+            # print("real_clean_set:",real_clean_set)
+
+            # CRITICAL: Apply rotation-based merge/reset logic based on drift detection
+            # This is essential for convergence - it merges last+current data (with rotation) 
+            # when no drift is detected, or resets to current only when drift is detected
+            rotate_120degree_update_clients_train_iterator_and_other_attribute(
+                clients,
+                rotate_degrees=rotate_degrees,
+                current_time_slot=t
+            )
 
             # Append current test iterator to history if requested
             if getattr(args_, 'eval_all_past_concepts', False):
@@ -2707,14 +2714,6 @@ def run_experiment(args_, exp_logger=None):
                         c._test_history.append(copy.deepcopy(c.test_iterator))
                     except Exception:
                         pass
-
-
-            real_shift_set, real_clean_set = get_real_shift_clients_set(clients)
-            # print("real_shift_set:",real_shift_set)
-            # print("real_clean_set:",real_clean_set)
-
-            # NOTE: Data loaders are now updated in the "if t != 0" block above using update_client_data_loaders()
-            # No need to call rotate_120degree_update_clients_train_iterator_and_other_attribute() here anymore
 
             prediction_accuracy = get_shift_clients_prediction_accuracy(shift_set=shift_eval,clean_set=clean_eval,
                                                                         real_shift_set=real_shift_set,real_clean_set=real_clean_set)
@@ -2766,7 +2765,7 @@ def run_experiment(args_, exp_logger=None):
         current_round = 0
         pre_action = 0
 
-        while current_round < args_.n_rounds:
+        while current_round <= args_.n_rounds:
 
       
             if pre_action == 0:
