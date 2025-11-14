@@ -142,7 +142,9 @@ class ExperienceReplayBuffer:
         # Extract training samples
         train_samples = []
         for idx in range(len(train_dataset)):
-            data, label = train_dataset[idx]
+            # Handle datasets that return (data, label) or (data, label, *metadata)
+            # Extended unpacking: *rest captures any extra values (index, drift_type, etc.)
+            data, label, *rest = train_dataset[idx]
             train_samples.append((data, label))
         
         # Add to training buffer
@@ -152,7 +154,9 @@ class ExperienceReplayBuffer:
         if self.store_val and val_dataset is not None:
             val_samples = []
             for idx in range(len(val_dataset)):
-                data, label = val_dataset[idx]
+                # Handle datasets that return (data, label) or (data, label, *metadata)
+                # Extended unpacking: *rest captures any extra values (index, drift_type, etc.)
+                data, label, *rest = val_dataset[idx]
                 val_samples.append((data, label))
             
             self.n_seen_val = self._add_to_buffer(val_samples, self.val_buffer, self.n_seen_val)
