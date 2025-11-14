@@ -1,11 +1,13 @@
 import os
 import pickle
 import string
+import bisect
 
 import torch
 from torchvision.datasets import CIFAR10, CIFAR100, EMNIST
 from torchvision.transforms import Compose, ToTensor, Normalize
 from torch.utils.data import Dataset
+from torchvision import transforms
 
 import numpy as np
 from PIL import Image
@@ -649,68 +651,151 @@ class RotateMergedDataset(Dataset):
         return img, target, index
 
 class Rotate120MergedDataset(Dataset):
-    def __init__(self, datasets,rotate_degrees,transform=None):
+    """
+    Merge multiple datasets and apply rotation to all samples.
+    
+    Handles both regular datasets (with .data attribute) and BufferedDataset (ER buffers).
+    Regular datasets are pre-computed for efficiency, while BufferedDataset samples
+    are fetched on-demand to save memory.
+    
+    Rotation logic:
+    - Dataset at index 1: rotated by rotate_degrees
+    - All other datasets: rotated by (rotate_degrees - 120)
+    """
+    def __init__(self, datasets, rotate_degrees, transform=None):
+        """
+        Parameters
+        ----------
+        datasets : list of Dataset
+            Can be regular datasets (with .data attribute) or BufferedDataset (ER buffers)
+        rotate_degrees : int
+            Rotation angle (0, 120, 240) - applied to dataset at index 1
+            Other datasets get rotated by (rotate_degrees - 120)
+        transform : optional
+            Transform to apply after rotation
+        """
         self.datasets = datasets
-        self.data = []
-        self.targets = []
-
+        self.rotate_degrees = rotate_degrees
+        self.transform = transform  # Store transform
+        self.cumulative_sizes = self._cumsum([len(d) for d in datasets])
+        
+        # Precompute rotated data for regular datasets (optimization)
+        self.rotated_data = []
+        self.rotated_targets = []
+        self.dataset_types = []  # Track which datasets are pre-computed vs on-demand
+        
         for i, dataset in enumerate(datasets):
-
+            # Determine rotation for this dataset index
             if i == 1:
-
-                rotated_images = []
-                for img_array in dataset.data:
-                    img = Image.fromarray(img_array)  
-                    rotated_img = img.rotate(rotate_degrees)
-                    rotated_images.append(np.array(rotated_img))  
-
-         
-                self.data.append(rotated_images)
-                self.targets.append(dataset.targets)
+                dataset_rotation = rotate_degrees
             else:
-               
+                dataset_rotation = rotate_degrees - 120
+            
+            # Check if dataset has .data attribute (regular CIFAR dataset)
+            if hasattr(dataset, 'data') and hasattr(dataset, 'targets'):
+                # Regular dataset - precompute rotations
                 rotated_images = []
                 for img_array in dataset.data:
-                    img = Image.fromarray(img_array)  
-                    rotated_img = img.rotate(rotate_degrees-120)  
-                    
-                    rotated_images.append(np.array(rotated_img))  
-
-                self.data.append(rotated_images)
-                self.targets.append(dataset.targets)
-
-
-        self.data = np.concatenate(self.data)  
-        self.targets = np.concatenate(self.targets)  
-
-       
-        # self.data = torch.tensor(self.data)
-        # self.targets = torch.tensor(self.targets)
-
-        if transform is None:
-            self.transform = \
-                Compose([
-                    ToTensor(),
-                    Normalize(
-                        (0.4914, 0.4822, 0.4465),
-                        (0.2023, 0.1994, 0.2010)
-                    )
-                ])
-
+                    img = Image.fromarray(img_array)
+                    rotated_img = img.rotate(dataset_rotation, expand=False)
+                    rotated_images.append(np.array(rotated_img))
+                
+                self.rotated_data.append(np.array(rotated_images))
+                self.rotated_targets.append(np.array(dataset.targets))
+                self.dataset_types.append('precomputed')
+            else:
+                # BufferedDataset (ER buffer) - mark as None for on-demand fetching
+                self.rotated_data.append(None)
+                self.rotated_targets.append(None)
+                self.dataset_types.append(('ondemand', dataset_rotation))
+        
+        # Set default transform if none provided
+        if self.transform is None:
+            self.transform = Compose([
+                ToTensor(),
+                Normalize(
+                    (0.4914, 0.4822, 0.4465),
+                    (0.2023, 0.1994, 0.2010)
+                )
+            ])
+    
+    @staticmethod
+    def _cumsum(sequence):
+        """Calculate cumulative sum for efficient dataset indexing."""
+        r, s = [], 0
+        for e in sequence:
+            r.append(e + s)
+            s += e
+        return r
+    
     def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        img, target = self.data[index], self.targets[index]
-
-        img = Image.fromarray(img)
-
-        if self.transform is not None:
+        return self.cumulative_sizes[-1] if self.cumulative_sizes else 0
+    
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= len(self):
+            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+        
+        # Find which dataset this index belongs to
+        dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
+        sample_idx = idx - (self.cumulative_sizes[dataset_idx - 1] if dataset_idx > 0 else 0)
+        
+        # Get sample from appropriate source
+        if self.dataset_types[dataset_idx] == 'precomputed':
+            # Precomputed rotation (regular dataset)
+            img = self.rotated_data[dataset_idx][sample_idx]
+            target = self.rotated_targets[dataset_idx][sample_idx]
+            img = Image.fromarray(img)
+        else:
+            # On-demand fetch (BufferedDataset from ER)
+            dataset_rotation = self.dataset_types[dataset_idx][1]
+            sample = self.datasets[dataset_idx][sample_idx]
+            
+            # Handle tuple unpacking (BufferedDataset returns (data, label) or (data, label, metadata))
+            if isinstance(sample, tuple):
+                if len(sample) == 2:
+                    img, target = sample
+                elif len(sample) >= 3:
+                    img, target, *_ = sample  # Discard metadata using extended unpacking
+                else:
+                    raise ValueError(f"Unexpected sample format: {len(sample)} values")
+            else:
+                raise ValueError("BufferedDataset must return tuple")
+            
+            # Apply rotation if needed
+            if dataset_rotation != 0:
+                # If img is tensor, convert to PIL
+                if isinstance(img, torch.Tensor):
+                    if img.dim() == 3 and img.size(0) in [1, 3]:
+                        # CHW format - denormalize before converting to PIL
+                        mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(3, 1, 1)
+                        std = torch.tensor([0.2023, 0.1994, 0.2010]).view(3, 1, 1)
+                        denormalized = img * std + mean
+                        denormalized = torch.clamp(denormalized, 0, 1)
+                        img = transforms.ToPILImage()(denormalized)
+                    else:
+                        raise ValueError(f"Unexpected tensor shape for rotation: {img.shape}")
+                
+                # Rotate PIL image
+                if isinstance(img, Image.Image):
+                    img = img.rotate(dataset_rotation, expand=False)
+                elif isinstance(img, np.ndarray):
+                    # If still numpy array, convert to PIL first
+                    img = Image.fromarray(img)
+                    img = img.rotate(dataset_rotation, expand=False)
+        
+        # Apply transforms
+        if hasattr(self.datasets[dataset_idx], 'transform') and \
+           self.datasets[dataset_idx].transform is not None:
+            img = self.datasets[dataset_idx].transform(img)
+        elif self.transform is not None:
             img = self.transform(img)
-
-        target = target
-
-        return img, target, index
+        
+        # Handle target conversion
+        if isinstance(target, torch.Tensor):
+            target = target.item() if target.numel() == 1 else target
+        
+        # Return 3-tuple to match original behavior (img, target, index)
+        return img, target, idx
 class Rotate120MergedDatasetFmnist(Dataset):
     def __init__(self, datasets,rotate_degrees,transform=None):
         self.datasets = datasets
