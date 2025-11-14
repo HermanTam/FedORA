@@ -2376,24 +2376,29 @@ def run_experiment(args_, exp_logger=None):
         print("==> time slot {} starts..".format(t))
         current_events = {}
         
+        # Determine rotation degrees and cluster number based on time slot pattern
+        if t % 3 == 0:
+            rotate_degrees = 0
+            cluster_num = 4
+        elif t % 3 == 1:
+            rotate_degrees = 120
+            cluster_num = 3 if t == 1 else 4
+        elif t % 3 == 2:
+            rotate_degrees = 240
+            cluster_num = 4
+        
         if t != 0:
             # UPDATE EXISTING CLIENTS instead of recreating them
             print("==> Updating client data for new time slot..")
             
             if t % 3 == 0:
-                rotate_degrees = 0
-                cluster_num = 4
-                
                 torch.manual_seed(torch.seed())
                 last_data_indexes = copy.deepcopy(current_data_indexes)  
                 current_data_indexes = torch.randperm(train_num)  
                 torch.manual_seed(args_.seed)
 
             elif t % 3 == 1:
-                rotate_degrees = 120
-
                 if t == 1:
-                    cluster_num = 3
                     torch.manual_seed(torch.seed())
                     last_data_indexes = copy.deepcopy(current_data_indexes)  
                     range1 = list(range(0, 15)) 
@@ -2414,15 +2419,12 @@ def run_experiment(args_, exp_logger=None):
                     torch.manual_seed(args_.seed)
 
                 else:
-                    cluster_num = 4
                     torch.manual_seed(torch.seed())
                     last_data_indexes = copy.deepcopy(current_data_indexes)  
                     current_data_indexes = torch.randperm(train_num)  
                     torch.manual_seed(args_.seed)
 
             elif t % 3 == 2:
-                rotate_degrees = 240
-                cluster_num = 4
                 torch.manual_seed(torch.seed())
                 last_data_indexes = copy.deepcopy(current_data_indexes)  
                 current_data_indexes = torch.randperm(train_num)  
@@ -2583,6 +2585,86 @@ def run_experiment(args_, exp_logger=None):
 
             global_learners_ensemble = new_global_learners_ensemble
 
+            # CRITICAL FIX: Resize clients' learners_ensemble when cluster_num changes
+            # This ensures client.n_learners matches the new global_learners_ensemble size
+            current_client_n_learners = len(clients[0].learners_ensemble) if clients else cluster_num
+            if current_client_n_learners != cluster_num:
+                print(f"==> Resizing clients' learners_ensemble: {current_client_n_learners} → {cluster_num} learners")
+                
+                for client in clients:
+                    # Create new ensemble with correct size
+                    if args_.split:
+                        new_client_ensemble = get_split_learners_ensemble(
+                            n_learners=cluster_num,
+                            client_type=CLIENT_TYPE[args_.method],
+                            name=args_.experiment,
+                            device=args_.device,
+                            optimizer_name=args_.optimizer,
+                            scheduler_name=args_.lr_scheduler,
+                            initial_lr=args_.lr,
+                            input_dim=args_.input_dimension,
+                            output_dim=args_.output_dimension,
+                            n_rounds=args_.n_rounds,
+                            seed=args_.seed,
+                            mu=args_.mu,
+                            embedding_dim=args_.embedding_dimension,
+                            n_gmm=args_.n_gmm,
+                            domain_disc=args_.domain_disc,
+                            hard_cluster=args_.hard_cluster,
+                            binary=args_.binary
+                        )
+                    else:
+                        new_client_ensemble = get_learners_ensemble(
+                            n_learners=cluster_num,
+                            client_type=CLIENT_TYPE[args_.method],
+                            name=args_.experiment,
+                            device=args_.device,
+                            optimizer_name=args_.optimizer,
+                            scheduler_name=args_.lr_scheduler,
+                            initial_lr=args_.lr,
+                            input_dim=args_.input_dimension,
+                            output_dim=args_.output_dimension,
+                            n_rounds=args_.n_rounds,
+                            seed=args_.seed,
+                            mu=args_.mu,
+                            embedding_dim=args_.embedding_dimension,
+                            n_gmm=args_.n_gmm,
+                            hard_cluster=args_.hard_cluster,
+                            binary=args_.binary,
+                            phi_model=args.phi_model
+                        )
+                    
+                    # Copy existing learner weights (preserve learned knowledge)
+                    min_learners = min(len(client.learners_ensemble), cluster_num)
+                    for learner_id in range(min_learners):
+                        copy_model(new_client_ensemble[learner_id].model, 
+                                  client.learners_ensemble[learner_id].model)
+                    
+                    # Initialize new learners by copying the last existing learner
+                    # (better than random init - provides warm start)
+                    if cluster_num > current_client_n_learners:
+                        source_id = current_client_n_learners - 1
+                        for learner_id in range(current_client_n_learners, cluster_num):
+                            copy_model(new_client_ensemble[learner_id].model,
+                                      client.learners_ensemble[source_id].model)
+                    
+                    # Update client state
+                    client.learners_ensemble = new_client_ensemble
+                    client.n_learners = cluster_num
+                    
+                    # Update sample weights dimensions to match new cluster_num
+                    client.samples_weights = torch.ones(
+                        cluster_num, 
+                        client.n_train_samples
+                    ) / cluster_num
+                
+                print(f"==> Client ensembles resized successfully to {cluster_num} learners")
+            
+            # Verify ensemble sizes match before proceeding (safeguard assertion)
+            assert all(len(c.learners_ensemble) == cluster_num for c in clients), \
+                f"Client ensemble size mismatch! Expected {cluster_num}, got varying sizes"
+            assert all(c.n_learners == cluster_num for c in clients), \
+                f"Client n_learners mismatch! Expected {cluster_num}, got varying values"
             
             clients_output_prototype = get_clients_output_prototype_version1(
                 clients,
