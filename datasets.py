@@ -709,6 +709,9 @@ class Rotate120MergedDataset(Dataset):
                 self.rotated_targets.append(None)
                 self.dataset_types.append(('ondemand', dataset_rotation))
         
+        # Build unified targets array for compatibility (matches original behavior)
+        self._build_targets_array()
+        
         # Set default transform if none provided
         if self.transform is None:
             self.transform = Compose([
@@ -718,6 +721,48 @@ class Rotate120MergedDataset(Dataset):
                     (0.2023, 0.1994, 0.2010)
                 )
             ])
+    
+    def _build_targets_array(self):
+        """
+        Build unified targets array for compatibility with code expecting .targets attribute.
+        Matches original behavior of eager concatenation.
+        
+        For precomputed datasets: Uses existing rotated_targets arrays (no overhead)
+        For BufferedDatasets: Iterates once to extract targets during initialization
+        """
+        all_targets = []
+        
+        for i, dataset in enumerate(self.datasets):
+            if self.dataset_types[i] == 'precomputed':
+                # Use precomputed targets
+                all_targets.append(self.rotated_targets[i])
+            else:
+                # Extract targets from BufferedDataset by iterating once
+                dataset_targets = []
+                for idx in range(len(dataset)):
+                    sample = dataset[idx]
+                    
+                    # Handle tuple unpacking
+                    if isinstance(sample, tuple):
+                        if len(sample) == 2:
+                            _, target = sample
+                        elif len(sample) >= 3:
+                            _, target, *_ = sample
+                        else:
+                            raise ValueError(f"Unexpected sample format: {len(sample)} values")
+                    else:
+                        raise ValueError("BufferedDataset must return tuple")
+                    
+                    # Convert tensor to scalar if needed
+                    if isinstance(target, torch.Tensor):
+                        target = target.item() if target.numel() == 1 else int(target.item())
+                    
+                    dataset_targets.append(target)
+                
+                all_targets.append(np.array(dataset_targets))
+        
+        # Concatenate all targets (matches original behavior)
+        self.targets = np.concatenate(all_targets) if all_targets else np.array([])
     
     @staticmethod
     def _cumsum(sequence):
