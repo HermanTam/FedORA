@@ -1,0 +1,60 @@
+time_slot=0
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.9631
+global_all_mean=0.2410
+oa_old_mean=0.5986
+oa_global_mean=0.6026
+P_on_current_mean=0.9643
+G_on_old_mean=0.2329
+--------------------------------------------------------------------------------
+time_slot=1
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.5399
+global_all_mean=0.1318
+oa_old_mean=0.3603
+oa_global_mean=0.3423
+P_on_current_mean=0.5528
+G_on_old_mean=0.1679
+--------------------------------------------------------------------------------
+time_slot=2
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.4175
+global_all_mean=0.1375
+oa_old_mean=0.2998
+oa_global_mean=0.2932
+P_on_current_mean=0.4492
+G_on_old_mean=0.1504
+--------------------------------------------------------------------------------
+time_slot=3
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.3373
+global_all_mean=0.2499
+oa_old_mean=0.2700
+oa_global_mean=0.2935
+P_on_current_mean=0.3373
+G_on_old_mean=0.2028
+--------------------------------------------------------------------------------
+time_slot=4
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.3427
+global_all_mean=0.1775
+oa_old_mean=0.3145
+oa_global_mean=0.2751
+P_on_current_mean=0.3738
+G_on_old_mean=0.2552
+--------------------------------------------------------------------------------
+time_slot=5
+drift_type_counts={'none': 60}
+n_clients=60, nP=30, nG=30
+local_all_mean=0.4228
+global_all_mean=0.1618
+oa_old_mean=0.3431
+oa_global_mean=0.2986
+P_on_current_mean=0.4357
+G_on_old_mean=0.2504
+--------------------------------------------------------------------------------

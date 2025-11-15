@@ -1,0 +1,201 @@
+================================================================================
+LEGEND
+--------------------------------------------------------------------------------
+Personalization (P) Clients: P-clients on current local test (final slot).
+Generalization (G) Clients: G-clients on previous (old) local test (final slot; falls back to current if missing).
+Overall (All Clients): All clients on current local test (final slot).
+Objective-aware OLD: Mix by objective, P→local current; G→old (final slot).
+Objective-aware GLOBAL: Mix by objective, P→local current; G→fixed global test set (final slot).
+GLOBAL TEST (Global P/G): P/G-clients on the fixed global test set (baseline).
+P_on_local / G_on_local: P/G-clients on current local test (note: P_on_local equals P Clients).
+P_on_global / G_on_global: P/G-clients on the fixed global test set (duplicates Global P/G).
+Overall Global (All Clients): All clients on the fixed global test set (baseline).
+ACROSS-TIME: For each slot t, average over clients; then summarize those T values (mean/std/min/median/max).
+TASKS@FINAL (Rotation): Mean accuracy at final slot on rotation-stratified test sets (0°, 120°, 240°).
+
+================================================================================
+FINAL TEST ACCURACY GROUPED BY OBJECTIVE
+================================================================================
+
+Personalization (P) Clients (n=30):
+  Mean: 0.2897
+  Std:  0.1502
+  Min:  0.0595
+  Median: 0.2917
+  Max:  0.6071
+
+Generalization (G) Clients (n=30):
+  Mean: 0.2524
+  Std:  0.0873
+  Min:  0.0952
+  Median: 0.2560
+  Max:  0.4048
+
+Overall (All Clients, n=60):
+  Mean: 0.2873
+  Std:  0.1595
+  Min:  0.0595
+  Median: 0.2798
+  Max:  0.6429
+
+Objective-aware OLD (P: local, G: old) (n=60; P=30, G=30)
+  Mean: 0.2710
+  Std:  0.1233
+  Min:  0.0595
+  Median: 0.2798
+  Max:  0.6071
+
+Objective-aware GLOBAL (P: local, G: global) (n=60; P=30, G=30)
+  Mean: 0.2247
+  Std:  0.1242
+  Min:  0.0595
+  Median: 0.1695
+  Max:  0.6071
+
+GLOBAL TEST (Fixed baseline, objective-grouped)
+--------------------------------------------------------------------------------
+Global P (n=30):
+  Mean: 0.1606
+  Std:  0.0096
+  Min:  0.1497
+  Median: 0.1675
+  Max:  0.1703
+
+Global G (n=30):
+  Mean: 0.1597
+  Std:  0.0098
+  Min:  0.1497
+  Median: 0.1568
+  Max:  0.1722
+
+PER-OBJECTIVE BREAKDOWNS
+--------------------------------------------------------------------------------
+P_on_local:
+  Mean: 0.2897
+  Std:  0.1502
+  Min:  0.0595
+  Median: 0.2917
+  Max:  0.6071
+
+G_on_local:
+  Mean: 0.2849
+  Std:  0.1708
+  Min:  0.0833
+  Median: 0.2381
+  Max:  0.6429
+
+P_on_global:
+  Mean: 0.1606
+  Std:  0.0096
+  Min:  0.1497
+  Median: 0.1675
+  Max:  0.1703
+
+G_on_global:
+  Mean: 0.1597
+  Std:  0.0098
+  Min:  0.1497
+  Median: 0.1568
+  Max:  0.1722
+
+Overall Global (All Clients):
+  Mean: 0.1602
+  Std:  0.0096
+  Min:  0.1497
+  Median: 0.1651
+  Max:  0.1722
+
+ACROSS-TIME (per time-slot means)
+--------------------------------------------------------------------------------
+Local all clients:
+  Mean: 0.5092
+  Std:  0.2390
+  Min:  0.2873
+  Median: 0.4484
+  Max:  0.9627
+
+Global all clients:
+  Mean: 0.1838
+  Std:  0.0486
+  Min:  0.1365
+  Median: 0.1655
+  Max:  0.2472
+
+Objective-aware OLD (P: local, G: old):
+  Mean: 0.3687
+  Std:  0.1196
+  Min:  0.2710
+  Median: 0.3479
+  Max:  0.6014
+
+Objective-aware GLOBAL (P: local, G: global):
+  Mean: 0.3490
+  Std:  0.1366
+  Min:  0.2247
+  Median: 0.3239
+  Max:  0.6008
+
+P clients across-time (local current):
+  Mean: 0.5134
+  Std:  0.2381
+  Min:  0.2897
+  Median: 0.4712
+  Max:  0.9595
+
+G clients across-time (local current):
+  Mean: 0.5050
+  Std:  0.2410
+  Min:  0.2849
+  Median: 0.4256
+  Max:  0.9659
+
+G clients across-time (old baseline):
+  Mean: 0.2239
+  Std:  0.0329
+  Min:  0.1659
+  Median: 0.2343
+  Max:  0.2524
+
+P clients across-time (global baseline):
+  Mean: 0.1830
+  Std:  0.0480
+  Min:  0.1359
+  Median: 0.1657
+  Max:  0.2437
+
+G clients across-time (global baseline):
+  Mean: 0.1846
+  Std:  0.0492
+  Min:  0.1371
+  Median: 0.1653
+  Max:  0.2506
+
+TASKS@FINAL (Rotation)
+--------------------------------------------------------------------------------
+(rotation=0°)   Mean: 0.1610
+(rotation=120°) Mean: 0.1715
+(rotation=240°) Mean: 0.2455
+
+ALL PAST CONCEPTS @ FINAL
+--------------------------------------------------------------------------------
+All clients:
+  Mean: 0.1825
+  Std:  0.0801
+  Min:  0.0476
+  Median: 0.1667
+  Max:  0.4167
+
+P clients:
+  Mean: 0.1865
+  Std:  0.0821
+  Min:  0.0476
+  Median: 0.1726
+  Max:  0.4167
+
+G clients:
+  Mean: 0.1786
+  Std:  0.0793
+  Min:  0.0714
+  Median: 0.1667
+  Max:  0.3095
+
